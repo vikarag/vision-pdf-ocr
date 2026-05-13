@@ -1,0 +1,210 @@
+[
+    {
+        "title": "REFERENCE",
+        "pdf-page-no": 15,
+        "children": [
+            {
+                "title": "Nouns",
+                "pdf-page-no": 16,
+                "children": [
+                    {
+                        "title": "Animate and inanimate",
+                        "pdf-page-no": 16
+                    },
+                    {
+                        "title": "Singular and plural",
+                        "pdf-page-no": 16
+                    },
+                    {
+                        "title": "Definite and indefinite",
+                        "pdf-page-no": 17
+                    },
+                    {
+                        "title": "Case",
+                        "pdf-page-no": 18,
+                        "children": [
+                            {
+                                "title": "Case functions",
+                                "pdf-page-no": 18
+                            },
+                            {
+                                "title": "Noun classes",
+                                "pdf-page-no": 20,
+                                "children": [
+                                    {
+                                        "title": "Singular nouns",
+                                        "pdf-page-no": 20
+                                    },
+                                    {
+                                        "title": "Inanimate plurals",
+                                        "pdf-page-no": 23
+                                    },
+                                    {
+                                        "title": "Animate plurals",
+                                        "pdf-page-no": 23
+                                    }
+                                ]
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Conjoined nouns",
+                        "pdf-page-no": 24,
+                        "children": [
+                            {
+                                "title": "Coordinating 'and'",
+                                "pdf-page-no": 24
+                            },
+                            {
+                                "title": "Disjunctive 'or'",
+                                "pdf-page-no": 24
+                            }
+                        ]
+                    },
+                    {
+                        "title": "New nouns",
+                        "pdf-page-no": 25,
+                        "children": [
+                            {
+                                "title": "Loanwords",
+                                "pdf-page-no": 25
+                            },
+                            {
+                                "title": "Compound nouns",
+                                "pdf-page-no": 25
+                            },
+                            {
+                                "title": "Verbal nouns",
+                                "pdf-page-no": 26
+                            }
+                        ]
+                    }
+                ]
+            },
+            {
+                "title": "Pronouns",
+                "pdf-page-no": 29,
+                "children": [
+                    {
+                        "title": "Personal pronouns",
+                        "pdf-page-no": 29
+                    },
+                    {
+                        "title": "Demonstrative pronouns",
+                        "pdf-page-no": 29
+                    },
+                    {
+                        "title": "Interrogative pronouns",
+                        "pdf-page-no": 31
+                    },
+                    {
+                        "title": "Indefinite pronouns",
+                        "pdf-page-no": 33
+                    },
+                    {
+                        "title": "Reflexive pronouns",
+                        "pdf-page-no": 35
+                    },
+                    {
+                        "title": "Relative pronouns",
+                        "pdf-page-no": 35
+                    }
+                ]
+            }
+        ]
+    },
+    {
+        "title": "MODIFICATION",
+        "pdf-page-no": 37,
+        "children": [
+            {
+                "title": "Adjectives",
+                "pdf-page-no": 38,
+                "children": [
+                    {
+                        "title": "Descriptive adjectives",
+                        "pdf-page-no": 38
+                    },
+                    {
+                        "title": "Qualitative adjectives",
+                        "pdf-page-no": 39
+                    },
+                    {
+                        "title": "Quantitative adjectives",
+                        "pdf-page-no": 41
+                    },
+                    {
+                        "title": "Demonstrative adjectives",
+                        "pdf-page-no": 41
+                    },
+                    {
+                        "title": "Verbal adjectives",
+                        "pdf-page-no": 42,
+                        "children": [
+                            {
+                                "title": "Present verbal adjective",
+                                "pdf-page-no": 42
+                            },
+                            {
+                                "title": "Past verbal adjective",
+                                "pdf-page-no": 42
+                            },
+                            {
+                                "title": "Past participial verbal adjective",
+                                "pdf-page-no": 43
+                            }
+                        ]
+                    },
+                    {
+                        "title": "Summary",
+                        "pdf-page-no": 43
+                    }
+                ]
+            },
+            {
+                "title": "Numerals",
+                "pdf-page-no": 44,
+                "children": [
+                    {
+                        "title": "Cardinal numbers",
+                        "pdf-page-no": 44
+                    },
+                    {
+                        "title": "Quantifiers",
+                        "pdf-page-no": 45
+                    },
+                    {
+                        "title": "Ordinal numbers",
+                        "pdf-page-no": 46
+                    }
+                ]
+            },
+            {
+                "title": "Nouns as modifiers",
+                "pdf-page-no": 47,
+                "children": [
+                    {
+                        "title": "Genitive modifiers",
+                        "pdf-page-no": 47
+                    },
+                    {
+                        "title": "Locative modifiers",
+                        "pdf-page-no": 47
+                    },
+                    {
+                        "title": "Dative modifiers",
+                        "pdf-page-no": 47
+                    }
+                ]
+            },
+            {
+                "title": "Postpositions",
+                "pdf-page-no": 48
+            },
+            {
+                "title": "Relative clauses",
+                "pdf-page-no": 48
+            }
+        ]
+    }
+]
