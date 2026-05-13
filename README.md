@@ -554,10 +554,3 @@ print(f"Processed {result.pages_processed} pages")
 
 MIT
 
----
-
-## Related
-
-- [ocr-and-documents](https://github.com/vikarag) — PDF tool inventory for this system
-- [pdf-to-wiki-pipeline](https://github.com/vikarag) — Ingest extracted text into knowledge bases
-- [opendataloader-pdf](https://github.com/vikarag) — High-speed structured PDF parsing
