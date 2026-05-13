@@ -295,6 +295,14 @@ class VisionPDFProcessor:
             "4. Mark unclear text with [unclear: best_guess]\n"
             "5. If the page is blank or contains only illustrations, say so\n"
             "6. Output ONLY the extracted text and structure, no commentary\n"
+            "7. If a table of contents JSON file is provided, refer to it to assign the correct <h> tag level (#, ##, ###, ...) for each section title based on its hierarchy. The JSON structure is a nested array of objects, each with 'title', 'pdf-page-no' (actual PDF page number, NOT the printed page number), and optional 'children' (a nested array of the same structure). Depth 0 (top-level) = #, depth 1 = ##, depth 2 = ###, depth 3 = ####, etc. Match section titles by comparing against the 'title' field; use the 'pdf-page-no' field only to locate the correct page, not as the heading text.\n"
+            "8. Utilize generating <table> elements as much as possible for structured data.\n"
+            "9. When providing lists of words, use only ONE column per category. Do NOT create multi-column side-by-side tables. Good: | word | part of speech | meaning |. Bad: repeating columns side-by-side.\n"
+            "10. Beware of single line breaks between lines — they will collapse into a single line in HTML. Add TWO trailing spaces at the end of a line to force a proper <br> break.\n"
+            "11. Apply bold, italic, underline, and other formatting to the markdown output exactly as displayed in the original document.\n"
+            "12. Texts of the target language should be wrapped with <span class='tl'></span>. Example: the verb <span class='tl'>하다</span> means *to do*.\n"
+            "13. IGNORE all headers and footers (running page numbers, document titles, chapter banners at top/bottom of pages). Do not include them in the output.\n"
+            "14. For images, diagrams, or illustrations in the PDF: add a simple and minimal description of the original image in place of the image.\n"
         )
         if self.system_prompt:
             base += f"\nDocument context:\n{self.system_prompt}\n"
