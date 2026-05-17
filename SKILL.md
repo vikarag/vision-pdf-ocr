@@ -108,7 +108,7 @@ The built-in default system prompt (in `scripts/vision_ocr.py`) automatically ap
 9. **One column per category** — when listing words, do NOT create multi-column side-by-side tables
 10. **Double trailing spaces for line breaks** — single line breaks collapse in HTML; add two spaces at end of line to force `<br>`
 11. **Preserve formatting** — apply bold, italic, underline exactly as displayed
-12. **`<span class="tl">` wrapper** — target language text should be wrapped with `<span class="tl">text</span>`
+12. **`<tl>` wrapper** — target language text should be wrapped with `<tl>text</tl>`
 13. **Ignore headers and footers** — running page numbers, document titles, chapter banners
 14. **Image descriptions** — add simple minimal descriptions for images/diagrams/illustrations
 

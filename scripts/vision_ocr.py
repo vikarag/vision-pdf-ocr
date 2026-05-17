@@ -65,6 +65,48 @@ class VisionBackend:
         raise NotImplementedError
 
 
+class OllamaLocalBackend(VisionBackend):
+    """Local Ollama backend (no API key required)."""
+
+    def __init__(self, model: str = "llava", base_url: str = "http://localhost:11434", **kwargs):
+        super().__init__(model, **kwargs)
+        self.base_url = base_url.rstrip("/")
+
+    def extract_text(self, image_bytes: bytes, system_prompt: str, user_prompt: str) -> str:
+        img_b64 = base64.b64encode(image_bytes).decode()
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                    "images": [img_b64],
+                },
+            ],
+            "stream": False,
+        }
+
+        url = f"{self.base_url}/api/chat"
+
+        for attempt in range(self.max_retries):
+            try:
+                resp = requests.post(
+                    url,
+                    json=payload,
+                    timeout=180,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data["message"]["content"]
+            except requests.exceptions.RequestException as e:
+                if attempt == self.max_retries - 1:
+                    raise RuntimeError(f"Local Ollama failed after {self.max_retries} retries: {e}")
+                time.sleep(self.delay * (2 ** attempt))
+
+        return ""
+
+
 class OllamaBackend(VisionBackend):
     """Ollama Cloud native API backend."""
 
@@ -231,6 +273,7 @@ class VisionPDFProcessor:
         # Select backend
         model_defaults = {
             "ollama": "gemini-3-flash-preview:cloud",
+            "ollama-local": "llava",
             "openrouter": "google/gemini-3.1-pro-preview",
             "gemini": "gemini-3.1-pro-preview",
         }
@@ -238,6 +281,7 @@ class VisionPDFProcessor:
 
         backend_classes = {
             "ollama": OllamaBackend,
+            "ollama-local": OllamaLocalBackend,
             "openrouter": OpenRouterBackend,
             "gemini": GeminiBackend,
         }

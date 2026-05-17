@@ -41,9 +41,9 @@ Examples:
     )
     parser.add_argument(
         "--backend",
-        choices=["ollama", "openrouter", "gemini"],
-        default="ollama",
-        help="Vision backend (default: ollama)",
+        choices=["ollama", "ollama-local", "openrouter", "gemini"],
+        default="ollama-local",
+        help="Vision backend (default: ollama-local)",
     )
     parser.add_argument(
         "--model",
