@@ -73,20 +73,19 @@ python scripts/batch_ocr.py scan.pdf --output-dir ./extracted/
 python scripts/batch_ocr.py scan.pdf --resume
 ```
 
-### 5. Run in background (detached)
+### 5. Run in background with completion notification (default)
 
-For long-running jobs (100+ pages), run in background so the process continues even if the terminal session is interrupted:
+By default, all jobs run in **background mode** with **completion notifications** enabled. The process detaches from the terminal so it survives SSH disconnects, new messages, or session interruptions. You get alerted automatically when it finishes.
 
 ```bash
+# Simplest invocation — background + notification are now defaults
 python scripts/batch_ocr.py ./500-page-archive.pdf \
-  --system-prompt "19th century French administrative documents..." \
-  --background \
-  --log-file ./ocr.log
+  --system-prompt "19th century French administrative documents..."
 ```
 
 Monitor progress:
 ```bash
-tail -f ./ocr.log
+tail -f ./500-page-archive_ocr.log
 ```
 
 Check if still running:
@@ -101,12 +100,17 @@ Stop the job:
 kill $(cat ./500-page-archive_ocr.pid)
 ```
 
+**Opt-out flags:**
+- `--no-background` — run attached to the current terminal (foreground)
+- `--no-notify-on-complete` — suppress the completion alert
+
 **Background mode features:**
 - Process detaches from terminal (survives SSH disconnect, new messages, etc.)
 - Automatic log file with timestamps and command history
 - PID file for easy process management
 - Prevents duplicate jobs (checks PID file before starting)
 - `--resume` flag is preserved if specified
+- Completion notification sent via Hermes gateway IPC socket (or JSON fallback)
 - Default log file: `<output_dir>/<pdf>_ocr.log`
 - Default PID file: `<output_dir>/<pdf>_ocr.pid`
 
@@ -185,9 +189,12 @@ Options:
   --delay SECONDS         Delay between requests (default: 2.0, minimum 2.0 to stay under 30 RPM)
   --max-retries N         Retries per page (default: 3)
   --json                  Also save JSON metadata sidecar
-  --background            Run in background (detached from terminal)
+  --background            Run in background (default: true, use --no-background for foreground)
+  --no-background         Run in foreground (attached to terminal)
   --log-file PATH         Log file for background mode (default: <output_dir>/<pdf>_ocr.log)
   --pid-file PATH         PID file for background mode (default: <output_dir>/<pdf>_ocr.pid)
+  --notify-on-complete    Send completion notification (default: true, use --no-notify-on-complete to disable)
+  --no-notify-on-complete Do not send a completion notification
   --quiet                 Minimal output
   --help                  Show this help
 ```
@@ -547,18 +554,20 @@ For a 100-page document, expect **~10-15 minutes** total processing time.
 
 For documents with 200+ pages, consider these approaches to manage time and API load:
 
-### Option A: Background mode (recommended for all long jobs)
+### Option A: Background mode with notification (default, recommended for all jobs)
 
-Use `--background` to detach the process so it survives terminal disconnects, SSH sessions ending, or new messages arriving:
+Background mode is now the default. The process detaches from the terminal so it survives SSH disconnects, and you receive an automatic notification when it completes.
 
 ```bash
-python scripts/batch_ocr.py ./textbook.pdf \
-  --pages 1-500 \
-  --background \
-  --log-file ./textbook_ocr.log
+# Default invocation — background + notification enabled automatically
+python scripts/batch_ocr.py ./textbook.pdf --pages 1-500
 ```
 
 Monitor with `tail -f ./textbook_ocr.log`. The job continues even if you disconnect.
+
+**Opt-out:**
+- `--no-background` — run in foreground
+- `--no-notify-on-complete` — suppress the completion alert
 
 **Background mode features:**
 - Detaches from terminal completely (new session)
@@ -566,6 +575,9 @@ Monitor with `tail -f ./textbook_ocr.log`. The job continues even if you disconn
 - PID file for easy process management
 - Duplicate job prevention (won't start if already running)
 - Resume supported: include `--resume` to continue from checkpoint
+- **Completion notification** sent via Hermes gateway IPC socket or JSON fallback
+- Default log file: `<output_dir>/<pdf>_ocr.log`
+- Default PID file: `<output_dir>/<pdf>_ocr.pid`
 
 ### Option B: Chunked batches with explicit pause points (recommended for 400+ pages)
 
@@ -685,7 +697,8 @@ See `pdf-textbook-parser` skill for the complete splitting workflow, including h
 | Job was killed before completion | Checkpoint preserves progress. Resume with `--resume` or process remaining range with `--pages`. Note: output file is only written on successful completion — checkpoint holds the data but you must resume or re-run to get the markdown. |
 | Background job won't start ("already running") | Check PID file and kill stale process, or delete the PID file manually |
 | Background job seems stuck | Check log file with `tail -f`; verify API key is valid |
-| Lost SSH connection during long job | Use `--background` mode — job survives disconnects |
+| No completion notification received | Check that gateway is running (`hermes gateway status`); fallback JSON is written next to output |
+| Lost SSH connection during long job | Background mode is default — job survives disconnects automatically |
 
 ## Advanced: Programmatic Usage
 
@@ -716,14 +729,19 @@ print(f"Processed {result.pages_processed} pages")
 | `OLLAMA_API_KEY` | Ollama backend | Your Ollama Cloud API key |
 | `OPENROUTER_API_KEY` | OpenRouter backend | Your OpenRouter key |
 | `GEMINI_API_KEY` | Gemini backend | Google Gemini API key |
+| `VISION_OCR_NOTIFY` | Notification system | Set to `1` by background launcher to enable completion alerts in child process |
+| `HERMES_PLATFORM` | Notification routing | Platform name for gateway delivery (e.g., `telegram`) |
+| `HERMES_CHAT_ID` | Notification routing | Chat ID for routing completion alerts |
+| `HERMES_THREAD_ID` | Notification routing | Thread ID for routing completion alerts |
 
 ## References
 - `references/gulf-arabic-textbook-extraction.md` — Complete extraction pattern for Latin-transliterated Arabic textbooks: system prompt template, model comparison (gemini-flash vs gemma4), vocabulary table formatting rules, and 2-page test protocol
 - `references/test-results-palestinian-arabic.md` — Real-world validation: 29-page Palestinian Arabic textbook extracted with 100% character preservation (68 ī, 64 š, 54 ē, 49 ʿ, etc.)
 - `references/sinhala-textbook-extraction.md` — Sinhala language learning materials: extracting Latin-alphabet transliteration from mixed English-Sinhala slide-based PDFs, handling Sinhala script alongside, code-mixed sentences, and pronunciation chart fragments
+- `references/sinhala-native-script-extraction.md` — Native-script Sinhala OCR session notes: system prompt for pure Sinhala script extraction without `<tl>` tags or translation, observed page types, and quality observations
 - `references/sinhala-grammar-toc-integration.md` — TOC JSON integration workflow: preparing, cleaning Unicode escapes, flattening, and embedding a table of contents for correct heading hierarchy in grammar books
 - `references/ollama-cloud-backend.md` — Why native API is used (not Hermes `vision_analyze`), tested models, and backend alternatives
-- `references/skills-sh-ocr-research.md` — Skills.sh research findings that led to this skill's creation; comparison with skills.sh OCR skills; DeepSeek API limitations
+- `references/sinhala-native-script-extraction.md` — Native-script Sinhala OCR session notes: system prompt for pure Sinhala script extraction without `<tl>` tags or translation, observed page types, and quality observations
 
 ## Notes
 
