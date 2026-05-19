@@ -347,6 +347,7 @@ class VisionPDFProcessor:
             "12. Texts of the target language should be wrapped with <span class='tl'></span>. Example: the verb <span class='tl'>하다</span> means *to do*.\n"
             "13. IGNORE all headers and footers (running page numbers, document titles, chapter banners at top/bottom of pages). Do not include them in the output.\n"
             "14. For images, diagrams, or illustrations in the PDF: add a simple and minimal description of the original image in place of the image.\n"
+            "15. NEVER use LaTeX math syntax (e.g. `$\\rightarrow$`, `$\\leftarrow$`, `$\\uparrow$`, `$\\downarrow$`) for arrows or symbols. Use plain Unicode characters instead: →, ←, ↑, ↓, ⇒, ⇐, ↔, etc. Only use LaTeX if the original document itself is a LaTeX/math paper and the user explicitly requests it.\n"
         )
         if self.system_prompt:
             base += f"\nDocument context:\n{self.system_prompt}\n"
