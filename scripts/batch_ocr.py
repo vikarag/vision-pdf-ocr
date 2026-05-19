@@ -107,7 +107,14 @@ Examples:
     parser.add_argument(
         "--background",
         action="store_true",
-        help="Run in background (detached from terminal). Use --log-file to capture output.",
+        default=True,
+        help="Run in background (detached from terminal). Use --no-background to run in foreground.",
+    )
+    parser.add_argument(
+        "--no-background",
+        dest="background",
+        action="store_false",
+        help="Run in foreground (attached to terminal)",
     )
     parser.add_argument(
         "--log-file",
@@ -118,6 +125,18 @@ Examples:
         "--pid-file",
         default="",
         help="PID file path for background mode (default: <output_dir>/<pdf>_ocr.pid)",
+    )
+    parser.add_argument(
+        "--notify-on-complete",
+        action="store_true",
+        default=True,
+        help="Send a notification to the user when the background job completes. Use --no-notify-on-complete to disable.",
+    )
+    parser.add_argument(
+        "--no-notify-on-complete",
+        dest="notify_on_complete",
+        action="store_false",
+        help="Do not send a completion notification",
     )
 
     return parser.parse_args()
@@ -135,6 +154,75 @@ def progress_callback(page: int, total: int, status: str):
     print(f"\r{icon} Page {page}/{total} ({status})", end="", flush=True)
     if status in ("success", "failed", "skipped"):
         print()  # newline after completion
+
+
+def _send_completion_notification(result, output_path: Path, pdf_path: Path):
+    """Send a completion notification to the user via Hermes gateway."""
+    try:
+        import json
+        import socket
+
+        # Build notification payload
+        status_emoji = "✅" if result.pages_failed == 0 else "⚠️"
+        summary = (
+            f"{status_emoji} **OCR Complete: {pdf_path.name}**\n\n"
+            f"- Pages total: {result.pages_total}\n"
+            f"- Processed: {result.pages_processed}\n"
+            f"- Failed: {result.pages_failed}\n"
+            f"- Output: `{output_path}`\n"
+            f"- Model: {result.model}\n"
+            f"- Backend: {result.backend}"
+        )
+
+        # Try to send via Hermes gateway IPC socket
+        hermes_home = Path.home() / ".hermes"
+        ipc_socket = hermes_home / "gateway.sock"
+
+        if ipc_socket.exists():
+            # Build source from environment if available
+            source = {"platform": "local", "chat_id": "", "thread_id": ""}
+            if "HERMES_PLATFORM" in os.environ:
+                source["platform"] = os.environ["HERMES_PLATFORM"]
+            if "HERMES_CHAT_ID" in os.environ:
+                source["chat_id"] = os.environ["HERMES_CHAT_ID"]
+            if "HERMES_THREAD_ID" in os.environ:
+                source["thread_id"] = os.environ["HERMES_THREAD_ID"]
+
+            payload = {
+                "type": "notification",
+                "text": summary,
+                "source": source,
+            }
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                sock.connect(str(ipc_socket))
+                sock.sendall(json.dumps(payload).encode() + b"\n")
+                sock.close()
+                print("📬 Completion notification sent via gateway")
+                return
+            except Exception:
+                sock.close()
+                # Fall through to alternative methods
+
+        # Fallback: write a notification file that can be picked up by a watcher
+        notify_path = output_path.parent / f"{pdf_path.stem}_ocr_notification.json"
+        notify_data = {
+            "type": "ocr_complete",
+            "pdf": str(pdf_path),
+            "output": str(output_path),
+            "pages_total": result.pages_total,
+            "pages_processed": result.pages_processed,
+            "pages_failed": result.pages_failed,
+            "model": result.model,
+            "backend": result.backend,
+            "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "summary": summary,
+        }
+        notify_path.write_text(json.dumps(notify_data, indent=2), encoding="utf-8")
+        print(f"📬 Completion notification written to: {notify_path}")
+
+    except Exception as e:
+        print(f"⚠️  Failed to send completion notification: {e}", file=sys.stderr)
 
 
 def _daemonize(log_file: Path, pid_file: Path):
@@ -204,6 +292,12 @@ def _build_command(args: argparse.Namespace) -> list[str]:
         cmd.append("--json")
     if args.quiet:
         cmd.append("--quiet")
+    if args.notify_on_complete:
+        cmd.append("--notify-on-complete")
+    else:
+        cmd.append("--no-notify-on-complete")
+    if not args.background:
+        cmd.append("--no-background")
 
     return cmd
 
@@ -257,6 +351,16 @@ def main():
             log_fh.write(f"{'='*60}\n\n")
             log_fh.flush()
 
+            # Pass notification metadata via environment variables
+            env = os.environ.copy()
+            if args.notify_on_complete:
+                env["VISION_OCR_NOTIFY"] = "1"
+                # Try to capture the current session context for routing
+                for key in ("HERMES_SESSION_KEY", "HERMES_PLATFORM", "HERMES_CHAT_ID",
+                            "HERMES_THREAD_ID", "HERMES_USER_ID", "HERMES_USER_NAME"):
+                    if key in os.environ:
+                        env[key] = os.environ[key]
+
             # Start detached process
             process = subprocess.Popen(
                 cmd,
@@ -265,6 +369,7 @@ def main():
                 stdin=subprocess.DEVNULL,
                 close_fds=True,
                 start_new_session=True,
+                env=env,
             )
 
         # Write PID file
@@ -276,6 +381,10 @@ def main():
         print(f"   Monitor: tail -f {log_file}")
         print(f"   Stop: kill {process.pid}")
         print(f"   Resume supported: --resume flag is preserved")
+        if args.notify_on_complete:
+            print(f"   Notification: Will alert when complete")
+        else:
+            print(f"   Notification: Disabled")
         sys.exit(0)
 
     # Validate delay (minimum 2.0s to stay under 30 RPM)
@@ -353,6 +462,11 @@ def main():
     # Clean up checkpoint on success
     if result.pages_failed == 0 and not args.quiet:
         print("🧹 Checkpoint cleaned up (all pages succeeded)")
+
+    # Send completion notification if requested (default: enabled)
+    notify_enabled = args.notify_on_complete or os.environ.get("VISION_OCR_NOTIFY")
+    if notify_enabled:
+        _send_completion_notification(result, output_path, pdf_path)
 
     # Clean up PID file if it exists (background mode cleanup)
     pid_file.unlink(missing_ok=True)

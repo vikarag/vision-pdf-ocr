@@ -42,6 +42,12 @@ Vision-language models (Gemini, Claude) "read like humans" — they understand c
 
 ## Quick Start
 
+### Prerequisites
+
+```bash
+pip install pymupdf
+```
+
 ### 1. Basic extraction
 
 ```bash
@@ -366,6 +372,23 @@ FORMAT:
 
 **Chunk sizing for full-text:** 100-page chunks work well as a sweet spot — ~15-20 minutes per chunk, frequent checkpoints, easy to parallelize. See `references/sinhala-textbook-extraction.md` for parallel execution patterns.
 
+### Example 4b: Native-script Sinhala book — no translation, no `<tl>` tags
+
+When the source material is written **entirely in Sinhala script** (සිංහල) and the user wants the raw text preserved without any translation wrappers or `<tl>` tags:
+
+```bash
+python scripts/batch_ocr.py ./sinhala-native-script-book.pdf \
+  --system-prompt "This is a Sinhala language book written almost entirely in Sinhala script (සිංහල). Extract ALL text exactly as it appears, preserving the original Sinhala script precisely. Do NOT translate anything into English. Do NOT use the <tl> tag wrapper. Preserve all Sinhala characters, diacritics, and punctuation exactly as they appear in the original. Use markdown formatting (tables, headers, lists) where appropriate to reflect the visual structure of the page. Ignore page numbers, running headers, and footers. Mark unclear text with [unclear: best_guess]. If a page is blank or contains only illustrations, note it. Output ONLY the extracted text and structure — no commentary." \
+  --output-dir ./extracted/ \
+  --model gemini-3-flash-preview:cloud
+```
+
+**Key differences from transliteration extraction:**
+- Output is pure Sinhala script (සිංහල), not Latin transliteration
+- No `<tl>` tags — the default rule #12 (wrap target language in `<tl>`) is explicitly disabled
+- No English translation mixed in — the book itself is monolingual Sinhala
+- Model must correctly render complex Sinhala conjuncts and diacritic combinations
+
 ### Example 5: Multilingual academic paper
 
 ```bash
@@ -647,6 +670,7 @@ See `pdf-textbook-parser` skill for the complete splitting workflow, including h
 | Problem | Solution |
 |---------|----------|
 | "No API key found" | Add `OLLAMA_API_KEY=...` to `~/.hermes/.env` |
+| `ModuleNotFoundError: No module named 'fitz'` | Install PyMuPDF: `pip install pymupdf` |
 | Text is garbled/missing | Increase `--dpi` to 300 or higher |
 | Model misses special chars | Make them **explicit** in `--system-prompt` |
 | Model hallucinates characters / drops diacritics | Switch to `gemini-3-flash-preview:cloud` — see Model Selection section above |
