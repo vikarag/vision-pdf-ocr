@@ -67,6 +67,43 @@ python scripts/batch_ocr.py scan.pdf --output-dir ./extracted/
 python scripts/batch_ocr.py scan.pdf --resume
 ```
 
+### 5. Run in background (detached)
+
+For long-running jobs (100+ pages), run in background so the process continues even if the terminal session is interrupted:
+
+```bash
+python scripts/batch_ocr.py ./500-page-archive.pdf \
+  --system-prompt "19th century French administrative documents..." \
+  --background \
+  --log-file ./ocr.log
+```
+
+Monitor progress:
+```bash
+tail -f ./ocr.log
+```
+
+Check if still running:
+```bash
+ps aux | grep batch_ocr
+# or
+cat ./500-page-archive_ocr.pid | xargs ps
+```
+
+Stop the job:
+```bash
+kill $(cat ./500-page-archive_ocr.pid)
+```
+
+**Background mode features:**
+- Process detaches from terminal (survives SSH disconnect, new messages, etc.)
+- Automatic log file with timestamps and command history
+- PID file for easy process management
+- Prevents duplicate jobs (checks PID file before starting)
+- `--resume` flag is preserved if specified
+- Default log file: `<output_dir>/<pdf>_ocr.log`
+- Default PID file: `<output_dir>/<pdf>_ocr.pid`
+
 ## Model Selection for Character-Level Accuracy
 
 When extracting documents with **custom romanization or special character systems** (e.g., Arabic transliteration with 9, H, ḥ, ʿ, ī, ā), model choice matters significantly for character-level fidelity:
@@ -142,6 +179,9 @@ Options:
   --delay SECONDS         Delay between requests (default: 2.0, minimum 2.0 to stay under 30 RPM)
   --max-retries N         Retries per page (default: 3)
   --json                  Also save JSON metadata sidecar
+  --background            Run in background (detached from terminal)
+  --log-file PATH         Log file for background mode (default: <output_dir>/<pdf>_ocr.log)
+  --pid-file PATH         PID file for background mode (default: <output_dir>/<pdf>_ocr.pid)
   --quiet                 Minimal output
   --help                  Show this help
 ```
@@ -484,7 +524,27 @@ For a 100-page document, expect **~10-15 minutes** total processing time.
 
 For documents with 200+ pages, consider these approaches to manage time and API load:
 
-### Option A: Chunked batches with explicit pause points (recommended for 400+ pages)
+### Option A: Background mode (recommended for all long jobs)
+
+Use `--background` to detach the process so it survives terminal disconnects, SSH sessions ending, or new messages arriving:
+
+```bash
+python scripts/batch_ocr.py ./textbook.pdf \
+  --pages 1-500 \
+  --background \
+  --log-file ./textbook_ocr.log
+```
+
+Monitor with `tail -f ./textbook_ocr.log`. The job continues even if you disconnect.
+
+**Background mode features:**
+- Detaches from terminal completely (new session)
+- Log file captures all output with timestamps
+- PID file for easy process management
+- Duplicate job prevention (won't start if already running)
+- Resume supported: include `--resume` to continue from checkpoint
+
+### Option B: Chunked batches with explicit pause points (recommended for 400+ pages)
 
 Process in chunks of 50–100 pages, review quality, then continue. This prevents API overload and lets you validate output before committing the full document:
 
@@ -502,53 +562,53 @@ python scripts/batch_ocr.py ./textbook.pdf --pages 151-250 --output-name textboo
 - Validate quality early (catch prompt issues before page 400)
 - Prevent API rate-limit or connection timeout issues
 - Pause/resume without losing progress
-- Run multiple chunks in parallel (see Option B)
+- Run multiple chunks in parallel (see Option C)
 
 **Chunk size guidance:**
 - 50 pages: ~5-7 minutes, good for initial validation
 - 100 pages: ~15-20 minutes, **recommended sweet spot** for parallel execution (good throughput + frequent checkpoints)
 - 150+ pages: ~20-30 minutes, only after approach is validated
 
-### Option B: Parallel chunk execution (fastest for large documents)
+### Option C: Parallel chunk execution (fastest for large documents)
 
 Launch multiple non-overlapping chunks simultaneously as background processes. Each chunk writes to its own output file:
 
 ```bash
-# Terminal 1: chunk A
-python scripts/batch_ocr.py ./textbook.pdf --pages 1-100 --output-name textbook_p1-100.md &
+# Chunk A
+python scripts/batch_ocr.py ./textbook.pdf --pages 1-100 --output-name textbook_p1-100.md --background
 
-# Terminal 2: chunk B (different page range, different output file)
-python scripts/batch_ocr.py ./textbook.pdf --pages 101-200 --output-name textbook_p101-200.md &
+# Chunk B (different page range, different output file)
+python scripts/batch_ocr.py ./textbook.pdf --pages 101-200 --output-name textbook_p101-200.md --background
 
-# Terminal 3: chunk C
-python scripts/batch_ocr.py ./textbook.pdf --pages 201-300 --output-name textbook_p201-300.md &
+# Chunk C
+python scripts/batch_ocr.py ./textbook.pdf --pages 201-300 --output-name textbook_p201-300.md --background
 ```
 
 **Critical requirements for parallel execution:**
 - Each chunk must use **different `--pages` ranges** (no overlap)
 - Each chunk must use **different `--output-name` files** (no collision)
 - Same `--system-prompt`, `--backend`, and `--model` across all chunks
-- Monitor with `process poll` or `ps` — each job reports independently
+- Monitor with `tail -f` on each log file
 - Combine outputs after all chunks finish: `cat textbook_p*.md > textbook_full.md`
 
 **Note on page range gaps:** If you process chunk 1 as pages 1-50 for validation, then chunk 2 as 101-230, you are intentionally skipping pages 51-100. This is fine if those pages are known to be English-only (table of contents, instructions). Always verify the document structure before deciding which pages to skip.
 
 **When to use parallel:** When you need a 400+ page document processed quickly and the system prompt is already validated. A 493-page document splits into 5 chunks of ~100 pages each and finishes in ~15-20 minutes total (vs. ~50 minutes serial).
 
-### Option C: Background with checkpoint monitoring
+### Option D: Background with checkpoint monitoring
 Launch as a background process and monitor the checkpoint file:
 
 ```bash
-# Terminal 1: start the job
-python scripts/batch_ocr.py ./textbook.pdf --pages 1-500 &
+# Start the job
+python scripts/batch_ocr.py ./textbook.pdf --pages 1-500 --background --log-file ./ocr.log
 
-# Terminal 2: monitor progress
+# Monitor progress
 watch -n 10 'python3 -c "import json; cp=json.load(open(\".textbook_ocr_checkpoint_*.json\")); print(f\"Completed: {len(cp[\\\"completed_pages\\\"])}\")"'
 ```
 
 The checkpoint file (`.<pdf>_ocr_checkpoint_<hash>.json`) updates after every page. You can kill the process anytime and resume with `--resume`.
 
-### Option D: Pause at a specific page
+### Option E: Pause at a specific page
 If you need to stop at a specific page (e.g., to prevent overload or review intermediate results), simply kill the process. The checkpoint preserves all progress up to the last completed page. Resume later with `--resume` or process the remaining range explicitly:
 
 ```bash
@@ -599,6 +659,9 @@ See `pdf-textbook-parser` skill for the complete splitting workflow, including h
 | Pages fail repeatedly | Try `--backend openrouter` with different model |
 | Resume not working | Check checkpoint file exists in output dir |
 | Job was killed before completion | Checkpoint preserves progress. Resume with `--resume` or process remaining range with `--pages`. Note: output file is only written on successful completion — checkpoint holds the data but you must resume or re-run to get the markdown. |
+| Background job won't start ("already running") | Check PID file and kill stale process, or delete the PID file manually |
+| Background job seems stuck | Check log file with `tail -f`; verify API key is valid |
+| Lost SSH connection during long job | Use `--background` mode — job survives disconnects |
 
 ## Advanced: Programmatic Usage
 

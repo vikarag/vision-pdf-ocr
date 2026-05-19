@@ -7,11 +7,16 @@ Usage:
     python batch_ocr.py scan.pdf --pages 1-50 --dpi 300
     python batch_ocr.py scan.pdf --backend openrouter --model google/gemini-3.1-pro-preview
     python batch_ocr.py scan.pdf --resume
+    python batch_ocr.py scan.pdf --background --log-file ./ocr.log
 """
 from __future__ import annotations
 
 import argparse
+import os
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 # Add parent to path for imports
@@ -30,6 +35,7 @@ Examples:
   %(prog)s scan.pdf --pages 1-10 --dpi 300
   %(prog)s scan.pdf --backend openrouter --model google/gemini-3.1-pro-preview
   %(prog)s scan.pdf --resume --output-dir ./extracted/
+  %(prog)s scan.pdf --background --log-file ./ocr.log
         """,
     )
 
@@ -98,6 +104,21 @@ Examples:
         action="store_true",
         help="Minimal output",
     )
+    parser.add_argument(
+        "--background",
+        action="store_true",
+        help="Run in background (detached from terminal). Use --log-file to capture output.",
+    )
+    parser.add_argument(
+        "--log-file",
+        default="",
+        help="Log file path for background mode (default: <output_dir>/<pdf>_ocr.log)",
+    )
+    parser.add_argument(
+        "--pid-file",
+        default="",
+        help="PID file path for background mode (default: <output_dir>/<pdf>_ocr.pid)",
+    )
 
     return parser.parse_args()
 
@@ -116,6 +137,77 @@ def progress_callback(page: int, total: int, status: str):
         print()  # newline after completion
 
 
+def _daemonize(log_file: Path, pid_file: Path):
+    """Double-fork to detach from terminal completely."""
+    # First fork
+    pid = os.fork()
+    if pid > 0:
+        # Parent exits
+        sys.exit(0)
+
+    # Decouple from parent environment
+    os.chdir("/")
+    os.setsid()
+    os.umask(0)
+
+    # Second fork
+    pid = os.fork()
+    if pid > 0:
+        # Parent exits
+        sys.exit(0)
+
+    # Redirect standard file descriptors to log file
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    with open(log_file, "a+") as f:
+        # Write PID
+        pid_file.parent.mkdir(parents=True, exist_ok=True)
+        pid_file.write_text(str(os.getpid()))
+
+        # Redirect stdout/stderr to log file
+        os.dup2(f.fileno(), sys.stdout.fileno())
+        os.dup2(f.fileno(), sys.stderr.fileno())
+
+    # Ignore SIGHUP in case controlling terminal is closed
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
+
+
+def _build_command(args: argparse.Namespace) -> list[str]:
+    """Rebuild the command line without --background and related flags."""
+    cmd = [sys.executable, __file__]
+
+    # Add all args except background-related ones
+    cmd.append(args.pdf)
+    if args.system_prompt:
+        cmd.extend(["--system-prompt", args.system_prompt])
+    if args.backend != "ollama-local":
+        cmd.extend(["--backend", args.backend])
+    if args.model:
+        cmd.extend(["--model", args.model])
+    if args.dpi != 200:
+        cmd.extend(["--dpi", str(args.dpi)])
+    if args.pages:
+        cmd.extend(["--pages", args.pages])
+    if args.output_dir:
+        cmd.extend(["--output-dir", args.output_dir])
+    if args.output_name:
+        cmd.extend(["--output-name", args.output_name])
+    if args.resume:
+        cmd.append("--resume")
+    if args.delay != 2.0:
+        cmd.extend(["--delay", str(args.delay)])
+    if args.max_retries != 3:
+        cmd.extend(["--max-retries", str(args.max_retries)])
+    if args.json:
+        cmd.append("--json")
+    if args.quiet:
+        cmd.append("--quiet")
+
+    return cmd
+
+
 def main():
     args = parse_args()
     pdf_path = Path(args.pdf)
@@ -132,6 +224,59 @@ def main():
         output_path = output_dir / args.output_name
     else:
         output_path = output_dir / f"{pdf_path.stem}_ocr.md"
+
+    # Determine log and pid file paths
+    log_file = Path(args.log_file) if args.log_file else output_dir / f"{pdf_path.stem}_ocr.log"
+    pid_file = Path(args.pid_file) if args.pid_file else output_dir / f"{pdf_path.stem}_ocr.pid"
+
+    # Handle background mode
+    if args.background:
+        # Check if already running
+        if pid_file.exists():
+            try:
+                old_pid = int(pid_file.read_text().strip())
+                os.kill(old_pid, 0)  # Check if process exists
+                print(f"⚠️  Background job already running (PID {old_pid}).", file=sys.stderr)
+                print(f"   Log: {log_file}", file=sys.stderr)
+                print(f"   To monitor: tail -f {log_file}", file=sys.stderr)
+                print(f"   To stop: kill {old_pid}", file=sys.stderr)
+                sys.exit(1)
+            except (OSError, ValueError):
+                # Stale PID file
+                pid_file.unlink(missing_ok=True)
+
+        # Use subprocess.Popen for a simpler detached process on Linux
+        cmd = _build_command(args)
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(log_file, "a") as log_fh:
+            # Write header
+            log_fh.write(f"\n{'='*60}\n")
+            log_fh.write(f"Background OCR started at {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+            log_fh.write(f"Command: {' '.join(cmd)}\n")
+            log_fh.write(f"{'='*60}\n\n")
+            log_fh.flush()
+
+            # Start detached process
+            process = subprocess.Popen(
+                cmd,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                close_fds=True,
+                start_new_session=True,
+            )
+
+        # Write PID file
+        pid_file.write_text(str(process.pid))
+
+        print(f"🚀 Background OCR job started (PID {process.pid})")
+        print(f"   Log file: {log_file}")
+        print(f"   Output: {output_path}")
+        print(f"   Monitor: tail -f {log_file}")
+        print(f"   Stop: kill {process.pid}")
+        print(f"   Resume supported: --resume flag is preserved")
+        sys.exit(0)
 
     # Validate delay (minimum 2.0s to stay under 30 RPM)
     effective_delay = max(args.delay, 2.0)
@@ -208,6 +353,9 @@ def main():
     # Clean up checkpoint on success
     if result.pages_failed == 0 and not args.quiet:
         print("🧹 Checkpoint cleaned up (all pages succeeded)")
+
+    # Clean up PID file if it exists (background mode cleanup)
+    pid_file.unlink(missing_ok=True)
 
     sys.exit(0 if result.pages_failed < result.pages_total else 1)
 
