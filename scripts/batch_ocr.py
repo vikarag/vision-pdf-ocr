@@ -105,6 +105,17 @@ Examples:
         help="Minimal output",
     )
     parser.add_argument(
+        "--no-extract-images",
+        dest="extract_images",
+        action="store_false",
+        help="Disable automatic extraction of complex images/diagrams flagged by the vision model",
+    )
+    parser.add_argument(
+        "--images-dir",
+        default="",
+        help="Directory to save extracted images (default: <output_dir>/images/)",
+    )
+    parser.add_argument(
         "--background",
         action="store_true",
         default=True,
@@ -298,6 +309,10 @@ def _build_command(args: argparse.Namespace) -> list[str]:
         cmd.append("--no-notify-on-complete")
     if not args.background:
         cmd.append("--no-background")
+    if not args.extract_images:
+        cmd.append("--no-extract-images")
+    if args.images_dir:
+        cmd.extend(["--images-dir", args.images_dir])
 
     return cmd
 
@@ -400,6 +415,8 @@ def main():
         dpi=args.dpi,
         delay=effective_delay,
         max_retries=args.max_retries,
+        extract_images=args.extract_images,
+        images_dir=args.images_dir or None,
     )
 
     if not args.quiet:
@@ -408,6 +425,9 @@ def main():
         print(f"📊 DPI: {args.dpi}")
         print(f"📝 System prompt: {args.system_prompt[:60]}{'...' if len(args.system_prompt) > 60 else ''}")
         print(f"📁 Output: {output_path}")
+        print(f"🖼️  Image extraction: {'enabled' if args.extract_images else 'disabled'}")
+        if args.extract_images and args.images_dir:
+            print(f"   Images dir: {args.images_dir}")
         if args.resume:
             print("🔄 Resume mode enabled")
         print()

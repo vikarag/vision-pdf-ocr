@@ -262,6 +262,8 @@ class VisionPDFProcessor:
         dpi: int = 200,
         delay: float = 2.0,
         max_retries: int = 3,
+        extract_images: bool = True,
+        images_dir: Optional[str] = None,
     ):
         self.backend_name = backend
         self.system_prompt = system_prompt
@@ -269,6 +271,8 @@ class VisionPDFProcessor:
         # Enforce minimum 2-second delay to stay under 30 RPM
         self.delay = max(delay, 2.0)
         self.max_retries = max_retries
+        self.extract_images = extract_images
+        self.images_dir = Path(images_dir) if images_dir else None
 
         # Select backend
         model_defaults = {
@@ -344,10 +348,17 @@ class VisionPDFProcessor:
             "9. When providing lists of words, use only ONE column per category. Do NOT create multi-column side-by-side tables. Good: | word | part of speech | meaning |. Bad: repeating columns side-by-side.\n"
             "10. Beware of single line breaks between lines — they will collapse into a single line in HTML. Add TWO trailing spaces at the end of a line to force a proper <br> break.\n"
             "11. Apply bold, italic, underline, and other formatting to the markdown output exactly as displayed in the original document.\n"
-            "12. Texts of the target language should be wrapped with <span class='tl'></span>. Example: the verb <span class='tl'>하다</span> means *to do*.\n"
+            "12. Texts of the target language should be wrapped with <tl></tl>. Example: the verb <tl>하다</tl> means *to do*.\n"
             "13. IGNORE all headers and footers (running page numbers, document titles, chapter banners at top/bottom of pages). Do not include them in the output.\n"
             "14. For images, diagrams, or illustrations in the PDF: add a simple and minimal description of the original image in place of the image.\n"
             "15. NEVER use LaTeX math syntax (e.g. `$\\rightarrow$`, `$\\leftarrow$`, `$\\uparrow$`, `$\\downarrow$`) for arrows or symbols. Use plain Unicode characters instead: →, ←, ↑, ↓, ⇒, ⇐, ↔, etc. Only use LaTeX if the original document itself is a LaTeX/math paper and the user explicitly requests it.\n"
+            "16. COMPLEX IMAGE EXTRACTION: When you encounter images, diagrams, charts, or illustrations that contain important visual information that is difficult or impossible to convey accurately with text alone (e.g., complex diagrams, detailed charts, maps, anatomical illustrations, mathematical figures, flowcharts, architectural drawings), you MUST flag them for extraction using the following special syntax on its own line:\n"
+            "    `![FIGURE: brief description](extract://PAGENO-NN/bbox:x1,y1,x2,y2)`\n"
+            "    - PAGENO is the current page number (1-indexed).\n"
+            "    - NN is a sequential figure number on that page (01, 02, ...).\n"
+            "    - bbox:x1,y1,x2,y2 are the normalized bounding box coordinates (0.0–1.0) of the figure region you see, where (x1,y1) is the top-left and (x2,y2) is the bottom-right. Estimate these based on what you see in the image.\n"
+            "    - Only flag figures that are genuinely complex or visually information-dense. Simple decorative images, logos, or icons can remain as text descriptions per rule 14.\n"
+            "    - Place the extraction tag on its own line in the markdown, replacing where the figure would normally be described.\n"
         )
         if self.system_prompt:
             base += f"\nDocument context:\n{self.system_prompt}\n"
@@ -355,6 +366,90 @@ class VisionPDFProcessor:
 
     def _default_user_prompt(self, page_num: int, total_pages: int) -> str:
         return f"Extract text from page {page_num + 1} of {total_pages}. Format as markdown."
+
+    def _page_num_width(self, total_pages: int) -> int:
+        """Determine zero-pad width based on total page count."""
+        return len(str(total_pages))
+
+    def _extract_images_from_page(
+        self,
+        pdf_path: str,
+        page_num: int,
+        text: str,
+        images_dir: Path,
+        total_pages: int,
+    ) -> str:
+        """Parse extract:// tags in text, crop images from PDF, save them, and rewrite markdown refs.
+
+        Returns the text with extract:// URLs replaced by relative image paths.
+        """
+        import fitz
+        import re
+
+        # Pattern: ![FIGURE: ...](extract://PAGE-NN/bbox:x1,y1,x2,y2)
+        pattern = re.compile(
+            r"!\[([^\]]*)\]\(extract://(\d+)-(\d+)/bbox:([0-9.]+),([0-9.]+),([0-9.]+),([0-9.]+)\)"
+        )
+
+        if not pattern.search(text):
+            return text
+
+        doc = fitz.open(pdf_path)
+        try:
+            page = doc[page_num]
+            page_rect = page.rect
+            width = page_rect.width
+            height = page_rect.height
+
+            # Gather all matches first to assign sequential numbers per page
+            matches = list(pattern.finditer(text))
+            seq_counter = 0
+            pad_width = self._page_num_width(total_pages)
+
+            new_text = text
+            for m in matches:
+                seq_counter += 1
+                desc = m.group(1)
+                pageno = int(m.group(2))
+                # nn = int(m.group(3))  # VLM-provided sequential number (ignored, we reassign)
+                x1 = float(m.group(4))
+                y1 = float(m.group(5))
+                x2 = float(m.group(6))
+                y2 = float(m.group(7))
+
+                # Clamp coordinates
+                x1, x2 = max(0.0, min(x1, x2, 1.0)), max(0.0, min(x2, 1.0))
+                y1, y2 = max(0.0, min(y1, y2, 1.0)), max(0.0, min(y2, 1.0))
+
+                # Convert normalized to page coordinates
+                rect = fitz.Rect(
+                    x1 * width,
+                    y1 * height,
+                    x2 * width,
+                    y2 * height,
+                )
+
+                # Expand slightly for padding
+                rect = rect + (-2, -2, 2, 2)
+                rect = rect & page_rect  # intersect with page bounds
+
+                # Render crop at higher DPI for quality
+                zoom = max(self.dpi, 300) / 72
+                mat = fitz.Matrix(zoom, zoom)
+                pix = page.get_pixmap(clip=rect, matrix=mat)
+
+                # Filename: PAGENO-SEQ.png with dynamic padding
+                fname = f"{pageno:0{pad_width}d}-{seq_counter:02d}.png"
+                fpath = images_dir / fname
+                pix.save(str(fpath))
+
+                # Replace tag in markdown with relative path
+                rel_path = f"images/{fname}"
+                new_text = new_text.replace(m.group(0), f"![{desc}]({rel_path})", 1)
+
+            return new_text
+        finally:
+            doc.close()
 
     def process_pdf(
         self,
@@ -386,6 +481,11 @@ class VisionPDFProcessor:
         output_path = Path(output_path)
         output_dir = output_path.parent
         output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Determine images directory
+        images_dir = self.images_dir if self.images_dir else output_dir / "images"
+        if self.extract_images:
+            images_dir.mkdir(parents=True, exist_ok=True)
 
         # Load PDF
         import fitz
@@ -433,6 +533,12 @@ class VisionPDFProcessor:
                 # Extract via vision model
                 user_prompt = self._default_user_prompt(page_num, total_pages)
                 text = self.backend.extract_text(img_bytes, system_prompt, user_prompt)
+
+                # Extract images if enabled and tags present
+                if self.extract_images and images_dir:
+                    text = self._extract_images_from_page(
+                        str(pdf_path), page_num, text, images_dir, total_pages
+                    )
 
                 result = PageResult(
                     page=page_num + 1,

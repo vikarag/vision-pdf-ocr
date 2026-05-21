@@ -50,6 +50,7 @@ Output ONLY the extracted text and structure — no commentary.
 
 - **Missing `pymupdf`:** First run failed with `ModuleNotFoundError: No module named 'fitz'`. Fix: `pip install pymupdf`.
 - **Progress polling:** Without `--notify-on-complete`, user had to manually check log file repeatedly. This session led to making `--notify-on-complete` the default.
+- **LaTeX arrow syntax:** The model output `\$\\rightarrow\$`, `\$\\leftarrow\$`, `\$\\uparrow\$`, `\$\\downarrow\$` for arrows in sound-change tables (e.g., අ + ඉ → ඒ). User explicitly dislikes LaTeX math syntax in non-mathematical documents. Fix: added rule #15 to default system prompt banning LaTeX arrows; use Unicode `→←↑↓` instead. Post-hoc fix on extracted file: `sed -i 's/\\$\\\\rightarrow\\$/→/g; s/\\$\\\\leftarrow\\$/←/g; s/\\$\\\\uparrow\\$/↑/g; s/\\$\\\\downarrow\\$/↓/g' file.md`.
 
 ## Performance
 

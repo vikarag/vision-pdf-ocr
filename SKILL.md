@@ -157,7 +157,8 @@ The built-in default system prompt (in `scripts/vision_ocr.py`) automatically ap
 11. **Preserve formatting** — apply bold, italic, underline exactly as displayed
 12. **`<tl>` wrapper** — target language text should be wrapped with `<tl>text</tl>`
 13. **Ignore headers and footers** — running page numbers, document titles, chapter banners
-14. **Image descriptions** — add simple minimal descriptions for images/diagrams/illustrations
+14. **Image descriptions** — add simple minimal descriptions for images/diagrams/illustrations. For complex figures (diagrams, charts, maps, anatomical illustrations, mathematical figures, flowcharts, architectural drawings) that cannot be accurately described in text, the model flags them with `![FIGURE: description](extract://PAGENO-NN/bbox:x1,y1,x2,y2)` and they are automatically cropped and saved as PNG files.
+15. **No LaTeX arrows** — NEVER use LaTeX math syntax (`$\rightarrow$`, `$\leftarrow$`, `$\uparrow$`, `$\downarrow$`) for arrows or symbols. Use plain Unicode: `→`, `←`, `↑`, `↓`, `⇒`, `⇐`, `↔`. Only use LaTeX if the original document is a LaTeX/math paper and the user explicitly requests it.
 
 These rules are **appended to** (not replaced by) any custom `--system-prompt` you provide.
 
@@ -191,6 +192,8 @@ Options:
   --json                  Also save JSON metadata sidecar
   --background            Run in background (default: true, use --no-background for foreground)
   --no-background         Run in foreground (attached to terminal)
+  --no-extract-images     Disable automatic extraction of complex images/diagrams
+  --images-dir DIR        Directory to save extracted images (default: <output_dir>/images/)
   --log-file PATH         Log file for background mode (default: <output_dir>/<pdf>_ocr.log)
   --pid-file PATH         PID file for background mode (default: <output_dir>/<pdf>_ocr.pid)
   --notify-on-complete    Send completion notification (default: true, use --no-notify-on-complete to disable)
@@ -498,7 +501,45 @@ Türkçede üç ünlü vardır: a, ı, u...
 |------|-----|------|
 | A a | a | [a] |
 | B b | be | [b] |
+
+---
+
+## Page 25
+
+### Figure 2.3: Vowel Harmony Diagram
+
+![Vowel harmony flowchart](images/025-01.png)
+
+The diagram above illustrates the two-way and four-way vowel harmony rules...
 ```
+
+### Extracted Images (`images/` subdirectory)
+
+When the vision model flags a complex figure (diagram, chart, map, etc.), the system:
+
+1. **Detects** the `extract://` tag in the VLM output: `![FIGURE: description](extract://PAGENO-NN/bbox:x1,y1,x2,y2)`
+2. **Crops** the region from the original PDF page using PyMuPDF at 300 DPI (or higher if `--dpi` is set above 300)
+3. **Saves** the cropped image as PNG in the `images/` directory (or `--images-dir` if specified)
+4. **Rewrites** the markdown reference to point to the saved file
+
+**Filename format:** `[PAGENO]-[SEQ].png` with dynamic zero-padding based on total page count:
+- 1–9 pages: `1-01.png`, `2-01.png`
+- 10–99 pages: `01-01.png`, `25-03.png`
+- 100–999 pages: `001-01.png`, `025-04.png`
+- 1000+ pages: `0001-01.png`, etc.
+
+**Example directory structure:**
+```
+extracted/
+├── textbook_ocr.md
+└── images/
+    ├── 025-01.png
+    ├── 025-02.png
+    ├── 047-01.png
+    └── 128-01.png
+```
+
+To disable image extraction, use `--no-extract-images`. To specify a custom directory, use `--images-dir ./my_figures/`.
 
 ### JSON Sidecar (`<name>_ocr.json`) — optional with `--json`
 
@@ -534,8 +575,11 @@ Türkçede üç ünlü vardır: a, ı, u...
   ↓  Send to VLM with system prompt + image
 [Vision Model]
   ↓  Returns extracted markdown text
+  ↓  (If complex figures detected) Flags them with extract://PAGENO-NN/bbox:x1,y1,x2,y2
+[Image Extractor]
+  ↓  PyMuPDF crops the flagged region at 300+ DPI
 [Output] 
-  ↓  Concatenate all pages into single markdown file
+  ↓  Concatenate all pages into single markdown file + saved PNG crops in images/
 ```
 
 ## Rate Limiting
@@ -699,6 +743,10 @@ See `pdf-textbook-parser` skill for the complete splitting workflow, including h
 | Background job seems stuck | Check log file with `tail -f`; verify API key is valid |
 | No completion notification received | Check that gateway is running (`hermes gateway status`); fallback JSON is written next to output |
 | Lost SSH connection during long job | Background mode is default — job survives disconnects automatically |
+| LaTeX arrows in output (`$\rightarrow$`, etc.) | This should not happen with current default prompt (rule #15). If it does, post-process: `sed -i 's/\$\\rightarrow\$/→/g; s/\$\\leftarrow\$/←/g; s/\$\\uparrow\$/↑/g; s/\$\\downarrow\$/↓/g' file.md` |
+| Images not being extracted | Ensure `--no-extract-images` is not set. Check that the VLM is outputting `extract://` tags in the markdown. Complex figures must be flagged by the model — simple decorative images are intentionally skipped. |
+| Extracted images are blurry or low quality | Increase `--dpi` (default 200, crops use `max(dpi, 300)`). Use `--dpi 400` or higher for detailed diagrams. |
+| Image files have wrong names | Filenames use dynamic zero-padding based on total page count (e.g., `025-04.png` for 100–999 pages). This is expected behavior. |
 
 ## Advanced: Programmatic Usage
 
@@ -711,6 +759,8 @@ processor = VisionPDFProcessor(
     system_prompt="This is a medieval Latin manuscript...",
     dpi=300,
     delay=2.0,  # minimum 2.0s enforced to stay under 30 RPM
+    extract_images=True,        # Enable automatic image extraction (default: True)
+    images_dir="./my_figures",  # Custom directory for extracted images
 )
 
 result = processor.process_pdf(
@@ -738,10 +788,12 @@ print(f"Processed {result.pages_processed} pages")
 - `references/gulf-arabic-textbook-extraction.md` — Complete extraction pattern for Latin-transliterated Arabic textbooks: system prompt template, model comparison (gemini-flash vs gemma4), vocabulary table formatting rules, and 2-page test protocol
 - `references/test-results-palestinian-arabic.md` — Real-world validation: 29-page Palestinian Arabic textbook extracted with 100% character preservation (68 ī, 64 š, 54 ē, 49 ʿ, etc.)
 - `references/sinhala-textbook-extraction.md` — Sinhala language learning materials: extracting Latin-alphabet transliteration from mixed English-Sinhala slide-based PDFs, handling Sinhala script alongside, code-mixed sentences, and pronunciation chart fragments
-- `references/sinhala-native-script-extraction.md` — Native-script Sinhala OCR session notes: system prompt for pure Sinhala script extraction without `<tl>` tags or translation, observed page types, and quality observations
-- `references/sinhala-grammar-toc-integration.md` — TOC JSON integration workflow: preparing, cleaning Unicode escapes, flattening, and embedding a table of contents for correct heading hierarchy in grammar books
+- `references/sinhala-native-script-extraction.md` — Native-script Sinhala OCR session notes: system prompt for pure Sinhala script extraction without `<tl>` tags or translation, LaTeX arrow pitfall (`$\rightarrow$` → Unicode `→`), observed page types, and quality observations
 - `references/ollama-cloud-backend.md` — Why native API is used (not Hermes `vision_analyze`), tested models, and backend alternatives
-- `references/sinhala-native-script-extraction.md` — Native-script Sinhala OCR session notes: system prompt for pure Sinhala script extraction without `<tl>` tags or translation, observed page types, and quality observations
+- `references/vlm-guided-image-extraction.md` — VLM-guided image extraction architecture: two-stage pipeline (VLM detection + PyMuPDF cropping), bounding box tag format, dynamic zero-padding filename convention, and implementation details
+- `references/image-extraction-feature-validation.md` — Real-world validation of the image extraction feature on a 186-page Portuguese textbook (pages 64–69), including observed extraction behavior, filename format verification, and CLI testing notes
+- `references/skills-sh-ocr-research.md` — Skills.sh research findings that led to this skill's creation; comparison with skills.sh OCR skills; DeepSeek API limitations
+- `references/cli-background-mode-pattern.md` — Background mode implementation pattern: detached process, PID file, log file, completion notification via gateway IPC socket
 
 ## Notes
 
