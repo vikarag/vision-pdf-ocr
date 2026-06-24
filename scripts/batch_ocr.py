@@ -47,7 +47,7 @@ Examples:
     )
     parser.add_argument(
         "--backend",
-        choices=["ollama", "ollama-local", "openrouter", "gemini", "xiaomi-mimo"],
+        choices=["ollama", "ollama-local", "openrouter", "gemini"],
         default="ollama-local",
         help="Vision backend (default: ollama-local)",
     )

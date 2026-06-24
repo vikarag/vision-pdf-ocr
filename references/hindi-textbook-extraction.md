@@ -16,19 +16,19 @@ Hindi language textbook published in English. Pages contain Devanagari script, R
 | Retroflex consonants | t dot below, d dot below, etc. | boy, all right |
 | Palatal sibilant | s acute | thank you |
 
-## Model Comparison
+## Model Results
 
-Tested page 27 at DPI 250:
+Tested page 27 at DPI 250 with Gemini (`gemini-3-flash-preview:cloud`):
 
-| Aspect | Xiaomi Mimo (mimo-v2.5) | Gemini (gemini-3-flash-preview:cloud) |
-|--------|---------------------------|----------------------------------------|
-| Speed | ~15s | ~60s+ |
-| Devanagari tags | Correct | Correct |
-| Romanized tags | Correct | Correct |
-| Speaker names tagged | No | Yes |
-| Nasalization precision | Short (less precise) | Nasalized (more accurate) |
-| Gender markers | HTML sup | Unicode superscript |
-| Artifacts | None | Icon description added |
+| Aspect | Result |
+|--------|--------|
+| Speed | ~60s+ |
+| Devanagari tags | Correct |
+| Romanized tags | Correct |
+| Speaker names tagged | Yes |
+| Nasalization precision | Nasalized (more accurate) |
+| Gender markers | Unicode superscript |
+| Artifacts | Icon description added |
 
 ## Underlined Character Handling
 
@@ -39,8 +39,8 @@ The textbook uses underlined kh and g in some romanized forms. The prompt explic
 ```bash
 python scripts/batch_ocr.py ./hindi-textbook.pdf \
   --pages 27 \
-  --backend xiaomi-mimo \
-  --model mimo-v2.5 \
+  --backend ollama \
+  --model gemini-3-flash-preview:cloud \
   --system-prompt "This is a Hindi language textbook published in English. Mark ALL Hindi language text (both Devanagari script and Romanized transliteration) with tl tags.
 
 DIACRITIC ALPHABETS used for romanized Hindi:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Core vision OCR processor for scanned PDFs.
 
-Supports multiple backends (Ollama Cloud, OpenRouter, Gemini, Xiaomi Mimo) with
+Supports multiple backends (Ollama Cloud, OpenRouter, Gemini) with
 configurable system prompts for context-aware extraction.
 """
 from __future__ import annotations
@@ -251,63 +251,6 @@ class GeminiBackend(VisionBackend):
         return ""
 
 
-class XiaomiMimoBackend(VisionBackend):
-    """Xiaomi Mimo API backend (OpenAI-compatible).
-
-    Endpoint: https://token-plan-sgp.xiaomimimo.com/v1
-    """
-
-    BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1"
-
-    def __init__(self, model: str = "mimo-v2.5", **kwargs):
-        super().__init__(model, **kwargs)
-        self.api_key = _load_env("XIAOMI_MIMO_API_KEY")
-
-    def extract_text(self, image_bytes: bytes, system_prompt: str, user_prompt: str) -> str:
-        img_b64 = base64.b64encode(image_bytes).decode()
-        payload = {
-            "model": self.model,
-            "messages": [
-                {"role": "system", "content": system_prompt},
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/png;base64,{img_b64}"},
-                        },
-                    ],
-                },
-            ],
-        }
-
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json",
-        }
-
-        url = f"{self.BASE_URL}/chat/completions"
-
-        for attempt in range(self.max_retries):
-            try:
-                resp = requests.post(
-                    url,
-                    headers=headers,
-                    json=payload,
-                    timeout=120,
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                return data["choices"][0]["message"]["content"]
-            except requests.exceptions.RequestException as e:
-                if attempt == self.max_retries - 1:
-                    raise RuntimeError(f"Xiaomi Mimo API failed after {self.max_retries} retries: {e}")
-                time.sleep(self.delay * (2 ** attempt))
-
-        return ""
-
-
 class VisionPDFProcessor:
     """Main processor for extracting text from scanned PDFs via vision models."""
 
@@ -337,7 +280,6 @@ class VisionPDFProcessor:
             "ollama-local": "llava",
             "openrouter": "google/gemini-3.1-pro-preview",
             "gemini": "gemini-3.1-pro-preview",
-            "xiaomi-mimo": "mimo-v2.5",
         }
         self.model = model or model_defaults.get(backend, model_defaults["ollama"])
 
@@ -346,7 +288,6 @@ class VisionPDFProcessor:
             "ollama-local": OllamaLocalBackend,
             "openrouter": OpenRouterBackend,
             "gemini": GeminiBackend,
-            "xiaomi-mimo": XiaomiMimoBackend,
         }
         if backend not in backend_classes:
             raise ValueError(f"Unknown backend: {backend}. Use: {list(backend_classes.keys())}")

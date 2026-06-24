@@ -41,7 +41,6 @@ Vision-language models (Gemini, Claude) "read like humans" — they understand c
 | **Ollama Cloud** (default) | `OLLAMA_API_KEY` in `.env`, Pro subscription | Fast, cheap, multilingual |
 | **OpenRouter** | `OPENROUTER_API_KEY` in `.env` | Fallback, model choice |
 | **Direct Gemini** | `GEMINI_API_KEY` | Google's native API |
-| **Xiaomi Mimo** | `XIAOMI_MIMO_API_KEY` in `.env` | OpenAI-compatible endpoint (SGP) |
 
 ## Quick Start
 
@@ -885,7 +884,7 @@ bash ~/.hermes/skills/data-science/opendataloader-pdf/scripts/ingest_to_synthado
 
 | Problem | Solution |
 |---------|----------|
-| "No API key found" | Add `OLLAMA_API_KEY=...` (or `XIAOMI_MIMO_API_KEY=...`) to `~/.hermes/.env` |
+| "No API key found" | Add `OLLAMA_API_KEY=...` to `~/.hermes/.env` |
 | `ModuleNotFoundError: No module named 'fitz'` | Install PyMuPDF: `pip install pymupdf` |
 | Text is garbled/missing | Increase `--dpi` to 300 or higher |
 | Model misses special chars | Make them **explicit** in `--system-prompt` |
@@ -896,7 +895,7 @@ bash ~/.hermes/skills/data-science/opendataloader-pdf/scripts/ingest_to_synthado
 | Model assigns wrong heading levels | Embed the TOC directly in the system prompt with explicit "Page N: ## Title" format — see Example 6 |
 | Rate limit errors | Already handled — minimum 2s delay enforced |
 | Processing too slow | This is expected for vision OCR (~4-6s/page). For 200+ pages, see Large-Batch Processing Strategy |
-| Pages fail repeatedly | Try `--backend openrouter` or `--backend xiaomi-mimo` with different model |
+| Pages fail repeatedly | Try `--backend openrouter` with different model |
 | Resume not working / creates new checkpoint | **Critical:** The checkpoint hash includes the `--pages` range string. Changing `--pages` (e.g., from `53-270` to `110-270`) generates a **different checkpoint file** and resumes from scratch. **Always use the same `--pages` range when resuming.** To fill gaps, process the missing range with the SAME `--pages` value, or manually merge checkpoint JSONs by combining `completed_pages` and `results` dicts. See `references/fijian-textbook-extraction.md` for a detailed reproduction of this pitfall. |
 | Need to merge multiple checkpoints | When different `--pages` ranges create separate checkpoints, merge them programmatically: `python3 -c "import json; d1=json.load(open('checkpoint_a.json')); d2=json.load(open('checkpoint_b.json')); merged={'completed_pages': list(set(d1['completed_pages']) | set(d2['completed_pages'])), 'results': {**d1['results'], **d2['results']}}; json.dump(merged, open('combined.json','w'))"`. Then resume with the original `--pages` range. |
 | Background job dies immediately after launch | **Pitfall:** The native `--background` mode can fail silently. Use `terminal(background=true)` from Hermes, or run in a `screen`/`tmux` session. The subprocess fork sometimes exits before processing begins. See `references/fijian-textbook-extraction.md` for session reproduction. |
@@ -940,7 +939,6 @@ print(f"Processed {result.pages_processed} pages")
 | `OLLAMA_API_KEY` | Ollama backend | Your Ollama Cloud API key |
 | `OPENROUTER_API_KEY` | OpenRouter backend | Your OpenRouter key |
 | `GEMINI_API_KEY` | Gemini backend | Google Gemini API key |
-| `XIAOMI_MIMO_API_KEY` | Xiaomi Mimo backend | Xiaomi Mimo API key (SGP endpoint) |
 | `VISION_OCR_NOTIFY` | Notification system | Set to `1` by background launcher to enable completion alerts in child process |
 | `HERMES_PLATFORM` | Notification routing | Platform name for gateway delivery (e.g., `telegram`) |
 | `HERMES_CHAT_ID` | Notification routing | Chat ID for routing completion alerts |
@@ -956,8 +954,7 @@ print(f"Processed {result.pages_processed} pages")
 - `references/vlm-guided-image-extraction.md` — VLM-guided image extraction architecture: two-stage pipeline (VLM detection + PyMuPDF cropping), bounding box tag format, dynamic zero-padding filename convention, and implementation details
 - `references/image-extraction-feature-validation.md` — Real-world validation of the image extraction feature on a 186-page Portuguese textbook (pages 64–69), including observed extraction behavior, filename format verification, and CLI testing notes
 - `references/skills-sh-ocr-research.md` — Skills.sh research findings that led to this skill's creation; comparison with skills.sh OCR skills; DeepSeek API limitations
-- `references/adding-a-new-backend.md` — Step-by-step recipe for adding a new vision API backend (e.g., Xiaomi Mimo, OpenAI, Anthropic) to the OCR pipeline: class template, registration, CLI wiring, provider format cheat sheet, and common pitfalls
-- `references/xiaomi-mimo-backend.md` — Xiaomi Mimo Token Plan backend specifics: endpoint URL, model matrix (vision vs text-only), verification commands, and the `-pro` vs base model vision capability pitfall
+- `references/adding-a-new-backend.md` — Step-by-step recipe for adding a new vision API backend (e.g., OpenAI, Anthropic) to the OCR pipeline: class template, registration, CLI wiring, provider format cheat sheet, and common pitfalls
 - `references/cli-background-mode-pattern.md` — Background mode implementation pattern: detached process, PID file, log file, completion notification via gateway IPC socket
 
 ## Notes

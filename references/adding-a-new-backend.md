@@ -1,6 +1,6 @@
 # Adding a New Vision Backend to the OCR Pipeline
 
-Step-by-step recipe for adding a new vision API provider (e.g., Xiaomi Mimo, OpenAI, Anthropic, local endpoint) to the vision-pdf-ocr skill.
+Step-by-step recipe for adding a new vision API provider (e.g., OpenAI, Anthropic, local endpoint) to the vision-pdf-ocr skill.
 
 ## Files to Edit
 
@@ -76,7 +76,6 @@ model_defaults = {
     "ollama-local": "llava",
     "openrouter": "google/gemini-3.1-pro-preview",
     "gemini": "gemini-3.1-pro-preview",
-    "xiaomi-mimo": "mimo-v2.5",
     "myprovider": "default-model",  # <-- add
 }
 
@@ -85,7 +84,6 @@ backend_classes = {
     "ollama-local": OllamaLocalBackend,
     "openrouter": OpenRouterBackend,
     "gemini": GeminiBackend,
-    "xiaomi-mimo": XiaomiMimoBackend,
     "myprovider": MyProviderBackend,  # <-- add
 }
 ```
@@ -97,7 +95,7 @@ In `batch_ocr.py`, update the `--backend` argument:
 ```python
 parser.add_argument(
     "--backend",
-    choices=["ollama", "ollama-local", "openrouter", "gemini", "xiaomi-mimo", "myprovider"],
+    choices=["ollama", "ollama-local", "openrouter", "gemini", "myprovider"],
     default="ollama-local",
     help="Vision backend (default: ollama-local)",
 )
@@ -111,7 +109,7 @@ Add to the backends table and environment variables table.
 
 | Provider | Format | Image Field | Response Path | Auth |
 |----------|--------|-------------|---------------|------|
-| OpenAI / OpenRouter / Xiaomi Mimo | OpenAI | `messages[].content[].image_url` | `choices[0].message.content` | Bearer |
+| OpenAI / OpenRouter | OpenAI | `messages[].content[].image_url` | `choices[0].message.content` | Bearer |
 | Ollama Cloud | Ollama native | `messages[].images[]` | `message.content` | Bearer |
 | Ollama Local | Ollama native | `messages[].images[]` | `message.content` | None |
 | Gemini direct | Gemini native | `contents[].parts[].inline_data` | `candidates[0].content.parts[0].text` | URL param |
