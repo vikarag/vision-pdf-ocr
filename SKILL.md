@@ -16,6 +16,8 @@ metadata:
 
 Extract text from scanned, textless PDFs using vision-language models (VLMs) with **customizable system prompts** for context-aware accuracy.
 
+**Note on Remote Hosts**: If dependencies like `pymupdf` are missing on a NAS/SSH host, see `references/remote-nas-fallback-workflow.md` for a local-processing fallback pattern.
+
 Perfect for:
 - Old/blurry scanned textbooks
 - Documents with special characters or unusual romanization
@@ -39,6 +41,7 @@ Vision-language models (Gemini, Claude) "read like humans" — they understand c
 | **Ollama Cloud** (default) | `OLLAMA_API_KEY` in `.env`, Pro subscription | Fast, cheap, multilingual |
 | **OpenRouter** | `OPENROUTER_API_KEY` in `.env` | Fallback, model choice |
 | **Direct Gemini** | `GEMINI_API_KEY` | Google's native API |
+| **Xiaomi Mimo** | `XIAOMI_MIMO_API_KEY` in `.env` | OpenAI-compatible endpoint (SGP) |
 
 ## Quick Start
 
@@ -73,14 +76,16 @@ python scripts/batch_ocr.py scan.pdf --output-dir ./extracted/
 python scripts/batch_ocr.py scan.pdf --resume
 ```
 
-### 5. Run in background with completion notification (default)
+### 5. Run in background with completion notification (opt-in)
 
-By default, all jobs run in **background mode** with **completion notifications** enabled. The process detaches from the terminal so it survives SSH disconnects, new messages, or session interruptions. You get alerted automatically when it finishes.
+Jobs run in **foreground mode** by default (attached to the terminal). Use `--background` to detach the process so it survives SSH disconnects, and `--notify-on-complete` to get alerted when it finishes.
 
 ```bash
-# Simplest invocation — background + notification are now defaults
+# Run in background with notification
 python scripts/batch_ocr.py ./500-page-archive.pdf \
-  --system-prompt "19th century French administrative documents..."
+  --system-prompt "19th century French administrative documents..." \
+  --background \
+  --notify-on-complete
 ```
 
 Monitor progress:
@@ -100,9 +105,9 @@ Stop the job:
 kill $(cat ./500-page-archive_ocr.pid)
 ```
 
-**Opt-out flags:**
-- `--no-background` — run attached to the current terminal (foreground)
-- `--no-notify-on-complete` — suppress the completion alert
+**Opt-in flags:**
+- `--background` — run detached from the current terminal
+- `--notify-on-complete` — send a completion alert
 
 **Background mode features:**
 - Process detaches from terminal (survives SSH disconnect, new messages, etc.)
@@ -111,6 +116,7 @@ kill $(cat ./500-page-archive_ocr.pid)
 - Prevents duplicate jobs (checks PID file before starting)
 - `--resume` flag is preserved if specified
 - Completion notification sent via Hermes gateway IPC socket (or JSON fallback)
+- **Note:** Hermes `terminal()` has a hard 600s (10 minute) foreground timeout. For long jobs, use `terminal(background=true, notify_on_complete=True)` or chunk into smaller batches.
 - Default log file: `<output_dir>/<pdf>_ocr.log`
 - Default PID file: `<output_dir>/<pdf>_ocr.pid`
 
@@ -153,7 +159,7 @@ The built-in default system prompt (in `scripts/vision_ocr.py`) automatically ap
 7. **TOC JSON heading hierarchy** — if a TOC JSON is provided, use it to assign correct `<h>` tag levels (`#`, `##`, `###`, ...). The JSON has nested `title`/`pdf-page-no`/`children` structure. Depth 0 = `#`, depth 1 = `##`, etc. Match titles against the `title` field; use `pdf-page-no` only for page location (it's the actual PDF page number, not the printed one)
 8. **Use `<table>` elements** as much as possible for structured data
 9. **One column per category** — when listing words, do NOT create multi-column side-by-side tables
-10. **Double trailing spaces for line breaks** — single line breaks collapse in HTML; add two spaces at end of line to force `<br>`
+10. **Semantic line breaks** — do NOT mechanically mirror visual line breaks from the printed page. Lines that wrap due to page width belong to the same paragraph and must be joined into a single markdown line. Use reasoning to decide where genuine structural breaks occur (new paragraph, list item, table row, heading, etc.). When a hard line break IS appropriate within a block (e.g., between list items, dialogue lines, or distinct entries that are not separate paragraphs), add two trailing spaces at the end of the line to force a proper `<br>` break.
 11. **Preserve formatting** — apply bold, italic, underline exactly as displayed
 12. **`<tl>` wrapper** — target language text should be wrapped with `<tl>text</tl>`
 13. **Ignore headers and footers** — running page numbers, document titles, chapter banners
@@ -190,13 +196,13 @@ Options:
   --delay SECONDS         Delay between requests (default: 2.0, minimum 2.0 to stay under 30 RPM)
   --max-retries N         Retries per page (default: 3)
   --json                  Also save JSON metadata sidecar
-  --background            Run in background (default: true, use --no-background for foreground)
+  --background            Run in background (default: false, use --background to enable)
   --no-background         Run in foreground (attached to terminal)
   --no-extract-images     Disable automatic extraction of complex images/diagrams
   --images-dir DIR        Directory to save extracted images (default: <output_dir>/images/)
   --log-file PATH         Log file for background mode (default: <output_dir>/<pdf>_ocr.log)
   --pid-file PATH         PID file for background mode (default: <output_dir>/<pdf>_ocr.pid)
-  --notify-on-complete    Send completion notification (default: true, use --no-notify-on-complete to disable)
+  --notify-on-complete    Send completion notification (default: false, use --notify-on-complete to enable)
   --no-notify-on-complete Do not send a completion notification
   --quiet                 Minimal output
   --help                  Show this help
@@ -451,7 +457,61 @@ Page 54: ## Verbs
 - Depth 0 = `#`, depth 1 = `##`, depth 2 = `###`, depth 3 = `####`, depth 4 = `#####`
 - If the TOC JSON contains Unicode escapes (e.g., `\u014dn\u00e0`), clean them to actual characters (e.g., `ōnà`) before embedding — otherwise the model cannot match titles
 
-### Example 7: Resume after crash
+### Example 7: Language textbook with diacritic stripping — Fijian (Bauan)
+
+When the source material uses macrons (long vowel marks: ā, ē, ī, ō, ū) but you want the output written as plain Latin letters (a, e, i, o, u), explicitly instruct the model to **ignore macrons entirely**. This is common for language learners who want searchable plain-ASCII vocabulary.
+
+```bash
+python scripts/batch_ocr.py ./spoken-fijian-textbook.pdf \
+  --pages 53-270 \
+  --system-prompt "This is a Fijian language textbook (Bauan Fijian). The text contains Fijian words and phrases mixed with English instructional text, grammar notes, and translations.
+
+IMPORTANT DIACRITIC RULE: The Fijian text uses macrons (long vowel marks) over vowels: ā, ē, ī, ū, ō. You must COMPLETELY IGNORE these macrons and write the letters WITHOUT the macron mark. For example, 'bāravi' must be written as 'baravi', 'lēsoni' as 'lesoni', 'mākete' as 'makete', 'tū' as 'tu', 'vō' as 'vo'. Treat macron-vowels exactly like their plain counterparts: a, e, i, o, u. NEVER output ā, ē, ī, ō, ū in the extracted text.
+
+FIJIAN TEXT MARKING:
+All Fijian language text must be wrapped with <tl> tags. This includes:
+- Fijian words and phrases in dialogues
+- Fijian words in vocabulary lists
+- Fijian words in repetition and variable slot exercises
+- Fijian words in grammatical examples
+- Any Fijian text that is NOT English instructional text
+
+English instructional text, grammar explanations, section headers, and translations should NOT be wrapped in <tl> tags.
+
+DIALOGUE FORMATTING:
+Format dialogue lines as:
+> **A** <tl>Fijian text here</tl>
+> English translation here
+
+VOCABULARY LIST FORMATTING:
+- Vocabulary lists show Fijian words with English definitions
+- Format as markdown tables with | Fijian | English |
+- Keep multi-line entries together as a single row
+- Wrap Fijian words in <tl> tags
+
+STRUCTURE TO PRESERVE:
+- Lesson headers as # Lesson X
+- Section numbers as ## X.Y Title
+- Dialogue headers as ### Dialogue
+- Repetition headers as ### Repetition
+- Vocabulary headers as ### Vocabulary
+- Exercise headers as ### Exercise
+
+IGNORE page numbers, running headers like 'FIJIAN' at the top of pages, and footnote reference numbers (superscript numbers like ¹, ², ³, ⁴).
+
+Use markdown formatting to reflect the visual hierarchy of the page. Bold for emphasized words. Tables for vocabulary lists and structured content." \
+  --output-dir ./extracted_fijian_lessons/ \
+  --output-name "fijian_lessons_1-15_ocr.md" \
+  --model gemini-3-flash-preview:cloud \
+  --dpi 250
+```
+
+**Key points for diacritic stripping:**
+- The instruction must be **explicit and repeated** — "NEVER output ā, ē, ī, ō, ū" — because VLMs sometimes preserve visual diacritics by default
+- Always verify the first few pages for stray macrons before committing to a large batch
+- The `<tl>` tag wrapper (default rule #12) works well for marking target-language text separately from English instructional text
+
+### Example 8: Resume after crash
 
 ```bash
 python scripts/batch_ocr.py ./500-page-archive.pdf \
@@ -598,20 +658,22 @@ For a 100-page document, expect **~10-15 minutes** total processing time.
 
 For documents with 200+ pages, consider these approaches to manage time and API load:
 
-### Option A: Background mode with notification (default, recommended for all jobs)
+### Option A: Background mode with notification (opt-in)
 
-Background mode is now the default. The process detaches from the terminal so it survives SSH disconnects, and you receive an automatic notification when it completes.
+Use `--background` and `--notify-on-complete` to detach the process so it survives SSH disconnects, and receive an alert when it completes.
 
 ```bash
-# Default invocation — background + notification enabled automatically
-python scripts/batch_ocr.py ./textbook.pdf --pages 1-500
+# Run in background with notification
+python scripts/batch_ocr.py ./textbook.pdf --pages 1-500 \
+  --background \
+  --notify-on-complete
 ```
 
 Monitor with `tail -f ./textbook_ocr.log`. The job continues even if you disconnect.
 
-**Opt-out:**
-- `--no-background` — run in foreground
-- `--no-notify-on-complete` — suppress the completion alert
+**Opt-in:**
+- `--background` — run in background
+- `--notify-on-complete` — send completion alert
 
 **Background mode features:**
 - Detaches from terminal completely (new session)
@@ -687,6 +749,47 @@ watch -n 10 'python3 -c "import json; cp=json.load(open(\".textbook_ocr_checkpoi
 
 The checkpoint file (`.<pdf>_ocr_checkpoint_<hash>.json`) updates after every page. You can kill the process anytime and resume with `--resume`.
 
+### Option F: Hermes terminal with background=true (most reliable for very long jobs)
+
+When you need to process hundreds of pages without the 600s Hermes foreground timeout, use Hermes' `terminal(background=true, notify_on_complete=True)`:
+
+```python
+# From Hermes agent or execute_code
+terminal(
+    command="python scripts/batch_ocr.py ./textbook.pdf --pages 53-270 --resume",
+    background=True,
+    notify_on_complete=True,
+    timeout=600  # 10 min max for foreground, but background has no limit
+)
+```
+
+**Advantages over native `--background`:**
+- No timeout limit (background processes run until completion)
+- Automatic notification when done
+- Hermes tracks the process lifecycle
+- No silent fork failures
+
+**Chunking with this approach:**
+Since even background mode can be interrupted by system events, process in ~50-page chunks and use `--resume` to continue:
+
+```bash
+# Chunk 1: pages 53-100
+python scripts/batch_ocr.py ./textbook.pdf --pages 53-270
+# (wait for notification, then...)
+
+# Chunk 2: pages 101-150
+python scripts/batch_ocr.py ./textbook.pdf --pages 53-270 --resume
+# (wait for notification, then...)
+
+# Chunk 3: pages 151-200
+python scripts/batch_ocr.py ./textbook.pdf --pages 53-270 --resume
+# ... etc
+```
+
+Each chunk uses the SAME `--pages` range (`53-270`) so the checkpoint hash stays constant and `--resume` works correctly.
+
+See `references/fijian-textbook-extraction.md` for a complete session reproduction using this pattern.
+
 ### Option E: Pause at a specific page
 If you need to stop at a specific page (e.g., to prevent overload or review intermediate results), simply kill the process. The checkpoint preserves all progress up to the last completed page. Resume later with `--resume` or process the remaining range explicitly:
 
@@ -694,6 +797,76 @@ If you need to stop at a specific page (e.g., to prevent overload or review inte
 # Processed 1-230, now continue from 231
 python scripts/batch_ocr.py ./textbook.pdf --pages 231-493 --resume
 ```
+
+**Important:** When resuming, use the SAME `--pages` range as the original run to ensure the checkpoint hash matches. If you originally ran with `--pages 1-500`, resume with `--pages 1-500 --resume`, not `--pages 231-500 --resume`. The latter creates a new checkpoint file and starts from scratch.
+
+## Post-Processing: Splitting into Per-Chapter Files
+
+After OCR produces a single merged markdown file, you may want to split it into per-chapter or per-lesson files. This requires:
+
+1. **Knowing the page-to-chapter mapping** — either from the PDF's table of contents or by inspecting page content
+2. **Splitting the merged output** — extracting page ranges into separate files
+
+### Manual splitting with checkpoint data
+
+If you have the checkpoint JSON (`.<pdf>_ocr_checkpoint_<hash>.json`), you can extract specific page ranges programmatically:
+
+```python
+import json
+
+# Load checkpoint
+with open('.textbook_ocr_checkpoint_abc123.json', 'r') as f:
+    cp = json.load(f)
+
+# Extract pages for a specific lesson/chapter
+lesson_pages = range(53, 60)  # Lesson 1: pages 53-59
+lesson_content = []
+for p in lesson_pages:
+    p_str = str(p)
+    if p_str in cp['results']:
+        lesson_content.append(f"## Page {p}\n\n{cp['results'][p_str]}")
+
+# Write lesson file
+with open('lesson_01.md', 'w') as f:
+    f.write('# Lesson 1\n\n')
+    f.write('\n\n'.join(lesson_content))
+```
+
+### Automated splitting by TOC
+
+For textbooks with a known table of contents, map book page numbers to PDF page numbers (usually PDF page = book page + offset), then split:
+
+```python
+import json, os
+
+# Load combined checkpoint (merged from multiple runs if needed)
+with open('combined_results.json', 'r') as f:
+    results = json.load(f)
+
+# Lesson ranges (PDF page numbers)
+lesson_ranges = {
+    1: (53, 59), 2: (60, 68), 3: (69, 80), 4: (81, 91),
+    5: (92, 102), 6: (103, 115), 7: (116, 127), 8: (128, 139),
+    9: (140, 150), 10: (151, 163), 11: (164, 178), 12: (179, 190),
+    13: (191, 204), 14: (205, 219), 15: (220, 234),
+}
+
+output_dir = './lessons'
+os.makedirs(output_dir, exist_ok=True)
+
+for lesson_num, (start, end) in lesson_ranges.items():
+    lesson_content = []
+    for p in range(start, end + 1):
+        p_str = str(p)
+        if p_str in results:
+            lesson_content.append(f"## Page {p}\n\n{results[p_str]}")
+    
+    with open(f'{output_dir}/lesson_{lesson_num:02d}.md', 'w') as f:
+        f.write(f'# Lesson {lesson_num}\n\n')
+        f.write('\n\n'.join(lesson_content))
+```
+
+**Note:** The `pdf-textbook-parser` skill also provides a splitting script for vision OCR output. See that skill for a production-ready implementation.
 
 ## Integration with Wiki Pipeline
 
@@ -708,24 +881,11 @@ bash ~/.hermes/skills/data-science/opendataloader-pdf/scripts/ingest_to_synthado
   ./extracted/turkish-grammar-1920_ocr.md
 ```
 
-## Post-Processing: Splitting into Chapters
-
-The `batch_ocr.py` output is a single merged file. To split it into per-chapter markdown files, use the `pdf-textbook-parser` skill:
-
-```bash
-# After OCR completes:
-python ~/.hermes/skills/productivity/pdf-textbook-parser/scripts/split_vision_ocr.py \
-  ./extracted/textbook_ocr.md \
-  --output-dir ./chapters/
-```
-
-See `pdf-textbook-parser` skill for the complete splitting workflow, including handling TOC contamination and missing headings.
-
 ## Troubleshooting
 
 | Problem | Solution |
 |---------|----------|
-| "No API key found" | Add `OLLAMA_API_KEY=...` to `~/.hermes/.env` |
+| "No API key found" | Add `OLLAMA_API_KEY=...` (or `XIAOMI_MIMO_API_KEY=...`) to `~/.hermes/.env` |
 | `ModuleNotFoundError: No module named 'fitz'` | Install PyMuPDF: `pip install pymupdf` |
 | Text is garbled/missing | Increase `--dpi` to 300 or higher |
 | Model misses special chars | Make them **explicit** in `--system-prompt` |
@@ -736,13 +896,14 @@ See `pdf-textbook-parser` skill for the complete splitting workflow, including h
 | Model assigns wrong heading levels | Embed the TOC directly in the system prompt with explicit "Page N: ## Title" format — see Example 6 |
 | Rate limit errors | Already handled — minimum 2s delay enforced |
 | Processing too slow | This is expected for vision OCR (~4-6s/page). For 200+ pages, see Large-Batch Processing Strategy |
-| Pages fail repeatedly | Try `--backend openrouter` with different model |
-| Resume not working | Check checkpoint file exists in output dir |
-| Job was killed before completion | Checkpoint preserves progress. Resume with `--resume` or process remaining range with `--pages`. Note: output file is only written on successful completion — checkpoint holds the data but you must resume or re-run to get the markdown. |
+| Pages fail repeatedly | Try `--backend openrouter` or `--backend xiaomi-mimo` with different model |
+| Resume not working / creates new checkpoint | **Critical:** The checkpoint hash includes the `--pages` range string. Changing `--pages` (e.g., from `53-270` to `110-270`) generates a **different checkpoint file** and resumes from scratch. **Always use the same `--pages` range when resuming.** To fill gaps, process the missing range with the SAME `--pages` value, or manually merge checkpoint JSONs by combining `completed_pages` and `results` dicts. See `references/fijian-textbook-extraction.md` for a detailed reproduction of this pitfall. |
+| Need to merge multiple checkpoints | When different `--pages` ranges create separate checkpoints, merge them programmatically: `python3 -c "import json; d1=json.load(open('checkpoint_a.json')); d2=json.load(open('checkpoint_b.json')); merged={'completed_pages': list(set(d1['completed_pages']) | set(d2['completed_pages'])), 'results': {**d1['results'], **d2['results']}}; json.dump(merged, open('combined.json','w'))"`. Then resume with the original `--pages` range. |
+| Background job dies immediately after launch | **Pitfall:** The native `--background` mode can fail silently. Use `terminal(background=true)` from Hermes, or run in a `screen`/`tmux` session. The subprocess fork sometimes exits before processing begins. See `references/fijian-textbook-extraction.md` for session reproduction. |
 | Background job won't start ("already running") | Check PID file and kill stale process, or delete the PID file manually |
-| Background job seems stuck | Check log file with `tail -f`; verify API key is valid |
+| Terminal timeout kills long OCR jobs | Hermes `terminal()` has a hard 600s (10 minute) foreground timeout. For vision OCR at ~4-6s/page, this limits each run to ~25-30 pages. **Workaround:** Use `terminal(background=true, notify_on_complete=True)` — no timeout limit. Or chunk into 25-page batches. See `references/fijian-textbook-extraction.md` for chunking strategy. |
 | No completion notification received | Check that gateway is running (`hermes gateway status`); fallback JSON is written next to output |
-| Lost SSH connection during long job | Background mode is default — job survives disconnects automatically |
+| Lost SSH connection during long job | Use `--background` to detach, or run in `screen`/`tmux` |
 | LaTeX arrows in output (`$\rightarrow$`, etc.) | This should not happen with current default prompt (rule #15). If it does, post-process: `sed -i 's/\$\\rightarrow\$/→/g; s/\$\\leftarrow\$/←/g; s/\$\\uparrow\$/↑/g; s/\$\\downarrow\$/↓/g' file.md` |
 | Images not being extracted | Ensure `--no-extract-images` is not set. Check that the VLM is outputting `extract://` tags in the markdown. Complex figures must be flagged by the model — simple decorative images are intentionally skipped. |
 | Extracted images are blurry or low quality | Increase `--dpi` (default 200, crops use `max(dpi, 300)`). Use `--dpi 400` or higher for detailed diagrams. |
@@ -779,12 +940,14 @@ print(f"Processed {result.pages_processed} pages")
 | `OLLAMA_API_KEY` | Ollama backend | Your Ollama Cloud API key |
 | `OPENROUTER_API_KEY` | OpenRouter backend | Your OpenRouter key |
 | `GEMINI_API_KEY` | Gemini backend | Google Gemini API key |
+| `XIAOMI_MIMO_API_KEY` | Xiaomi Mimo backend | Xiaomi Mimo API key (SGP endpoint) |
 | `VISION_OCR_NOTIFY` | Notification system | Set to `1` by background launcher to enable completion alerts in child process |
 | `HERMES_PLATFORM` | Notification routing | Platform name for gateway delivery (e.g., `telegram`) |
 | `HERMES_CHAT_ID` | Notification routing | Chat ID for routing completion alerts |
 | `HERMES_THREAD_ID` | Notification routing | Thread ID for routing completion alerts |
 
 ## References
+- `references/fijian-textbook-extraction.md` — Fijian (Bauan) language textbook OCR: macron stripping (ā→a, ē→e, ī→i, ō→o, ū→u), `<tl>` tag wrapping for Fijian text, dialogue/vocabulary/repetition drill formatting, checkpoint hash pitfall with `--pages`, background mode failure workaround, terminal timeout chunking strategy, checkpoint merging technique, and per-lesson file splitting
 - `references/gulf-arabic-textbook-extraction.md` — Complete extraction pattern for Latin-transliterated Arabic textbooks: system prompt template, model comparison (gemini-flash vs gemma4), vocabulary table formatting rules, and 2-page test protocol
 - `references/test-results-palestinian-arabic.md` — Real-world validation: 29-page Palestinian Arabic textbook extracted with 100% character preservation (68 ī, 64 š, 54 ē, 49 ʿ, etc.)
 - `references/sinhala-textbook-extraction.md` — Sinhala language learning materials: extracting Latin-alphabet transliteration from mixed English-Sinhala slide-based PDFs, handling Sinhala script alongside, code-mixed sentences, and pronunciation chart fragments
@@ -793,6 +956,8 @@ print(f"Processed {result.pages_processed} pages")
 - `references/vlm-guided-image-extraction.md` — VLM-guided image extraction architecture: two-stage pipeline (VLM detection + PyMuPDF cropping), bounding box tag format, dynamic zero-padding filename convention, and implementation details
 - `references/image-extraction-feature-validation.md` — Real-world validation of the image extraction feature on a 186-page Portuguese textbook (pages 64–69), including observed extraction behavior, filename format verification, and CLI testing notes
 - `references/skills-sh-ocr-research.md` — Skills.sh research findings that led to this skill's creation; comparison with skills.sh OCR skills; DeepSeek API limitations
+- `references/adding-a-new-backend.md` — Step-by-step recipe for adding a new vision API backend (e.g., Xiaomi Mimo, OpenAI, Anthropic) to the OCR pipeline: class template, registration, CLI wiring, provider format cheat sheet, and common pitfalls
+- `references/xiaomi-mimo-backend.md` — Xiaomi Mimo Token Plan backend specifics: endpoint URL, model matrix (vision vs text-only), verification commands, and the `-pro` vs base model vision capability pitfall
 - `references/cli-background-mode-pattern.md` — Background mode implementation pattern: detached process, PID file, log file, completion notification via gateway IPC socket
 
 ## Notes

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Core vision OCR processor for scanned PDFs.
 
-Supports multiple backends (Ollama Cloud, OpenRouter, Gemini) with
+Supports multiple backends (Ollama Cloud, OpenRouter, Gemini, Xiaomi Mimo) with
 configurable system prompts for context-aware extraction.
 """
 from __future__ import annotations
@@ -251,6 +251,63 @@ class GeminiBackend(VisionBackend):
         return ""
 
 
+class XiaomiMimoBackend(VisionBackend):
+    """Xiaomi Mimo API backend (OpenAI-compatible).
+
+    Endpoint: https://token-plan-sgp.xiaomimimo.com/v1
+    """
+
+    BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1"
+
+    def __init__(self, model: str = "mimo-v2.5", **kwargs):
+        super().__init__(model, **kwargs)
+        self.api_key = _load_env("XIAOMI_MIMO_API_KEY")
+
+    def extract_text(self, image_bytes: bytes, system_prompt: str, user_prompt: str) -> str:
+        img_b64 = base64.b64encode(image_bytes).decode()
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/png;base64,{img_b64}"},
+                        },
+                    ],
+                },
+            ],
+        }
+
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
+        url = f"{self.BASE_URL}/chat/completions"
+
+        for attempt in range(self.max_retries):
+            try:
+                resp = requests.post(
+                    url,
+                    headers=headers,
+                    json=payload,
+                    timeout=120,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+            except requests.exceptions.RequestException as e:
+                if attempt == self.max_retries - 1:
+                    raise RuntimeError(f"Xiaomi Mimo API failed after {self.max_retries} retries: {e}")
+                time.sleep(self.delay * (2 ** attempt))
+
+        return ""
+
+
 class VisionPDFProcessor:
     """Main processor for extracting text from scanned PDFs via vision models."""
 
@@ -280,6 +337,7 @@ class VisionPDFProcessor:
             "ollama-local": "llava",
             "openrouter": "google/gemini-3.1-pro-preview",
             "gemini": "gemini-3.1-pro-preview",
+            "xiaomi-mimo": "mimo-v2.5",
         }
         self.model = model or model_defaults.get(backend, model_defaults["ollama"])
 
@@ -288,6 +346,7 @@ class VisionPDFProcessor:
             "ollama-local": OllamaLocalBackend,
             "openrouter": OpenRouterBackend,
             "gemini": GeminiBackend,
+            "xiaomi-mimo": XiaomiMimoBackend,
         }
         if backend not in backend_classes:
             raise ValueError(f"Unknown backend: {backend}. Use: {list(backend_classes.keys())}")
@@ -346,7 +405,7 @@ class VisionPDFProcessor:
             "7. If a table of contents JSON file is provided, refer to it to assign the correct <h> tag level (#, ##, ###, ...) for each section title based on its hierarchy. The JSON structure is a nested array of objects, each with 'title', 'pdf-page-no' (actual PDF page number, NOT the printed page number), and optional 'children' (a nested array of the same structure). Depth 0 (top-level) = #, depth 1 = ##, depth 2 = ###, depth 3 = ####, etc. Match section titles by comparing against the 'title' field; use the 'pdf-page-no' field only to locate the correct page, not as the heading text.\n"
             "8. Utilize generating <table> elements as much as possible for structured data.\n"
             "9. When providing lists of words, use only ONE column per category. Do NOT create multi-column side-by-side tables. Good: | word | part of speech | meaning |. Bad: repeating columns side-by-side.\n"
-            "10. Beware of single line breaks between lines — they will collapse into a single line in HTML. Add TWO trailing spaces at the end of a line to force a proper <br> break.\n"
+            "10. LINE BREAK REASONING: Do NOT mechanically mirror the visual line breaks from the printed page. Lines that wrap in the original PDF purely due to page width are NOT real line breaks — they belong to the same paragraph and must be joined into a single markdown line. Use your own reasoning to decide where genuine structural breaks occur: a new paragraph, a new list item, a new table row, a new section heading, etc. Only insert a line break when the content logically warrants one, not because the text happened to wrap at that point in the printed original. When a hard line break IS appropriate within a block (e.g., between items in a list, between lines of dialogue, or between distinct entries that are not separate paragraphs), add two trailing spaces at the end of the line to force a proper <br> break in the rendered output.\n"
             "11. Apply bold, italic, underline, and other formatting to the markdown output exactly as displayed in the original document.\n"
             "12. Texts of the target language should be wrapped with <tl></tl>. Example: the verb <tl>하다</tl> means *to do*.\n"
             "13. IGNORE all headers and footers (running page numbers, document titles, chapter banners at top/bottom of pages). Do not include them in the output.\n"

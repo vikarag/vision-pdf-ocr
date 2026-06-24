@@ -47,7 +47,7 @@ Examples:
     )
     parser.add_argument(
         "--backend",
-        choices=["ollama", "ollama-local", "openrouter", "gemini"],
+        choices=["ollama", "ollama-local", "openrouter", "gemini", "xiaomi-mimo"],
         default="ollama-local",
         help="Vision backend (default: ollama-local)",
     )
@@ -118,7 +118,7 @@ Examples:
     parser.add_argument(
         "--background",
         action="store_true",
-        default=True,
+        default=False,
         help="Run in background (detached from terminal). Use --no-background to run in foreground.",
     )
     parser.add_argument(
@@ -140,7 +140,7 @@ Examples:
     parser.add_argument(
         "--notify-on-complete",
         action="store_true",
-        default=True,
+        default=False,
         help="Send a notification to the user when the background job completes. Use --no-notify-on-complete to disable.",
     )
     parser.add_argument(
