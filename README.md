@@ -552,5 +552,9 @@ print(f"Processed {result.pages_processed} pages")
 
 ## License
 
-MIT
+MIT — see [LICENSE](LICENSE).
+
+Copyright (c) 2026 vikarag. You are free to use, modify, and redistribute this
+skill, including commercially, provided the copyright notice is retained.
+
 
